@@ -231,8 +231,17 @@ def meta_stabilitaet(conn: sqlite3.Connection, tag_a: str, tag_b: str,
     stark sich die Reihenfolge des Metagames zwischen den beiden Tagen erhalten
     hat. 1 bedeutet eine unveraenderte Rangfolge, 0 keinerlei Zusammenhang.
 
-    Da beide Reihen bereits Raenge sind, ist die Spearman-Korrelation hier
-    definitionsgemaess die Produkt-Moment-Korrelation der Raenge.
+    Die Berechnung erfolgt bewusst ueber die Definition -- Produkt-Moment-
+    Korrelation der Raenge -- statt ueber ``corr(method="spearman")``. Pandas
+    delegiert diesen Modus an ``scipy.stats.spearmanr``; scipy waere damit eine
+    Laufzeitabhaengigkeit fuer eine einzige Zeile. Sie liesse sich zudem nicht
+    sinnvoll festlegen: fuer Python 3.10 endet scipy bei 1.15.3, fuer 3.14
+    beginnt es erst bei 1.16.1 -- es gibt keine Version, die alle Zielumgebungen
+    des Projekts bedient.
+
+    Wichtig ist die Reihenfolge: erst die Paare bilden, dann rangieren. Wuerde
+    ueber die vollstaendigen Spalten rangiert und erst danach zusammengefuehrt,
+    entstuenden bei Luecken andere Werte als bei Spearman.
     """
     a = _lese(conn, """
         SELECT anzeigename, rang FROM V_Usage
@@ -243,11 +252,12 @@ def meta_stabilitaet(conn: sqlite3.Connection, tag_a: str, tag_b: str,
         WHERE datum_iso = ? AND kampfformat = ? AND saison_aktuell = 1
     """, (tag_b, kampfformat))
 
-    gemeinsam = a.merge(b, on="anzeigename", how="inner")
+    gemeinsam = a.merge(b, on="anzeigename", how="inner").dropna(
+        subset=["rang", "rang_b"])
     if len(gemeinsam) < 3:
         return None
 
-    korrelation = gemeinsam["rang"].corr(gemeinsam["rang_b"], method="spearman")
+    korrelation = gemeinsam["rang"].rank().corr(gemeinsam["rang_b"].rank())
     return None if pd.isna(korrelation) else round(float(korrelation), 4)
 
 
