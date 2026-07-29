@@ -12,6 +12,7 @@ gehoert nicht in einen Testlauf ohne Netzverbindung.
 from __future__ import annotations
 
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -19,8 +20,40 @@ import pytest
 WURZEL = Path(__file__).resolve().parents[1]
 DWH = Path(os.getenv("VGC_BI_DB", WURZEL / "data" / "vgc_dwh.db"))
 
+
+# Die Tabelle, an der sich "befuellt" entscheidet.
+LEITTABELLE = "Fact_Champions_Usage"
+
+
+def _ist_befuellt(pfad: Path) -> bool:
+    """Prueft auf Inhalt, nicht auf blosse Existenz.
+
+    Eine leere Datenbankdatei entsteht schon durch einen einzigen Verbindungs-
+    aufbau. Wuerde hier nur ``exists()`` stehen, liefe die gesamte Testreihe
+    gegen ein leeres Warehouse und meldete ein Dutzend irrefuehrender Fehler
+    statt eines klaren "uebersprungen".
+
+    Ein Fehler beim Lesen wird bewusst **nicht** verschluckt: ein stiller
+    Uebersprung bei falschem Tabellennamen sieht im Bericht aus wie ein
+    bestandener Lauf. Genau so bleiben Fehler unentdeckt.
+    """
+    if not pfad.exists():
+        return False
+    verbindung = sqlite3.connect(f"file:{pfad}?mode=ro", uri=True)
+    try:
+        vorhanden = verbindung.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (LEITTABELLE,)).fetchone()
+        if not vorhanden:
+            return False  # Datei da, aber Schema noch nicht angelegt.
+        return verbindung.execute(
+            f"SELECT EXISTS(SELECT 1 FROM {LEITTABELLE})").fetchone()[0] == 1
+    finally:
+        verbindung.close()
+
+
 pytestmark = pytest.mark.skipif(
-    not DWH.exists(),
+    not _ist_befuellt(DWH),
     reason="Kein befuelltes Data Warehouse vorhanden -- Oberflaechentests uebersprungen.",
 )
 
@@ -119,15 +152,21 @@ def test_speedtiers_mit_team_und_szenario() -> None:
     app.multiselect(key="speed_team").set_value(auswahl.options[:3]).run()
     assert not app.exception, f"Ausnahme mit Team: {app.exception}"
 
-    # Das Auswahlfeld meldet die formatierten Beschriftungen, nicht die Schluessel.
+    # Das Auswahlfeld meldet die formatierten Beschriftungen; gesetzt werden muss
+    # dagegen der Rohschluessel. Aeltere Streamlit-Versionen bilden eine
+    # Beschriftung nicht auf ihren Schluessel zurueck und wuerden das format_func
+    # der Anwendung mit einem KeyError treffen -- der Rohschluessel funktioniert
+    # in jeder Version.
+    from bi.stats import SZENARIEN
+
     szenario = app.selectbox(key="speed_vergleich_szenario")
     assert any("Bizarroraum" in o for o in szenario.options), "Bizarroraum fehlt."
 
-    for suchbegriff in ("Rueckenwind (eigene", "Bizarroraum", "Eissturm"):
-        beschriftung = next(o for o in szenario.options if suchbegriff in o)
-        app.selectbox(key="speed_vergleich_szenario").set_value(beschriftung).run()
+    for schluessel in ("rueckenwind", "bizarroraum", "eissturm"):
+        assert schluessel in SZENARIEN
+        app.selectbox(key="speed_vergleich_szenario").set_value(schluessel).run()
         assert not app.exception, (
-            f"Ausnahme im Szenario '{beschriftung}': {app.exception}"
+            f"Ausnahme im Szenario '{SZENARIEN[schluessel].bezeichnung}': {app.exception}"
         )
 
 
