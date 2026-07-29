@@ -1,0 +1,23 @@
+# Data Warehouse (wird per ETL erzeugt, gehoert nicht ins Repo)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Werkzeugspezifische Konfiguration
+.claude/

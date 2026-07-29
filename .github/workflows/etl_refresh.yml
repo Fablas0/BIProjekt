@@ -1,0 +1,61 @@
+name: Monatlicher ETL-Refresh
+
+# Operationalisierung des Ladeprozesses.
+#
+# Smogon veroeffentlicht die Auswertung eines Monats in den ersten Tagen des
+# Folgemonats. Der Lauf ist auf den 5. gelegt, damit die Daten sicher vorliegen.
+# Er baut das Data Warehouse neu auf, prueft die Qualitaet und stellt das
+# Ergebnis als Artefakt bereit, das die Anwendung beim Start beziehen kann.
+on:
+  schedule:
+    - cron: "0 4 5 * *"
+  workflow_dispatch:
+    inputs:
+      monate:
+        description: "Anzahl Monate der Zeitreihe"
+        required: false
+        default: "6"
+      elo:
+        description: "ELO-Grenzwert"
+        required: false
+        default: "1760"
+
+jobs:
+  refresh:
+    name: Data Warehouse neu aufbauen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhaengigkeiten installieren
+        run: pip install -r requirements.txt
+
+      - name: ETL ausfuehren
+        run: |
+          python -m scripts.etl_lauf \
+            --elo "${{ github.event.inputs.elo || '1760' }}" \
+            --monate "${{ github.event.inputs.monate || '6' }}"
+
+      - name: Qualitaetstor
+        run: python -m scripts.qualitaet_pruefen --mindestindex 90
+
+      - name: Data Warehouse bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: vgc-dwh-${{ github.run_number }}
+          path: data/vgc_dwh.db
+          retention-days: 90
+
+      - name: Zusammenfassung im Lauf hinterlegen
+        if: always()
+        run: |
+          {
+            echo "## ETL-Refresh"
+            echo ""
+            python -m scripts.qualitaet_pruefen --mindestindex 0 || true
+          } >> "$GITHUB_STEP_SUMMARY"
