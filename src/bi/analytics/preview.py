@@ -46,6 +46,7 @@ import pandas as pd
 from ..config import STANDARD_KAMPFFORMAT
 from ..stats import handelt_zuerst
 from ..typechart import eingehender_multiplikator
+from . import saison
 
 # Gewichtung der drei Teilaspekte. Offensive wiegt am schwersten: im
 # Doppelkampf werden Partien ueber Druck entschieden, nicht ueber Aussitzen.
@@ -114,13 +115,13 @@ class Empfehlung:
 def _attacken_je_pokemon(conn: sqlite3.Connection, tag: str, kampfformat: str
                          ) -> dict[str, list[tuple[str, str, str, int]]]:
     """Laedt die verlaesslich gespielten Attacken je Pokemon."""
-    df = pd.read_sql("""
+    df = pd.read_sql(saison.anwenden("""
         SELECT anzeigename AS pokemon, bezeichnung AS attacke, anteil,
                attacke_typ AS typ, attacke_kategorie AS kategorie, basisschaden
         FROM V_Merkmal
         WHERE kategorie = 'move' AND datum_iso = ? AND kampfformat = ?
           AND saison_aktuell = 1 AND anteil >= ?
-    """, conn, params=(tag, kampfformat, ATTACKEN_SCHWELLE))
+    """, conn), conn, params=(tag, kampfformat, ATTACKEN_SCHWELLE))
 
     # Statusattacken und Attacken ohne Stammdaten fallen heraus: nur Attacken mit
     # Typ und Schadenskategorie sind fuer die Matchup-Bewertung verwertbar.
@@ -149,7 +150,7 @@ def lade_kaempfer(conn: sqlite3.Connection, namen: list[str], tag: str,
         return []
 
     platzhalter = ",".join("?" * len(namen))
-    stamm = pd.read_sql(f"""
+    stamm = pd.read_sql(saison.anwenden(f"""
         SELECT u.anzeigename, u.pokedex_id, u.typ1, u.typ2, u.rang,
                COALESCE(m.wert_attack,    u.stufe50_attack)    AS attack,
                COALESCE(m.wert_sp_attack, u.stufe50_sp_attack) AS sp_attack,
@@ -162,7 +163,7 @@ def lade_kaempfer(conn: sqlite3.Connection, namen: list[str], tag: str,
               AND m.kategorie = 'spread' AND m.rang = 1
         WHERE u.anzeigename IN ({platzhalter}) AND u.datum_iso = ?
           AND u.kampfformat = ? AND u.saison_aktuell = 1
-    """, conn, params=(*namen, tag, kampfformat))  # noqa: S608
+    """, conn), conn, params=(*namen, tag, kampfformat))  # noqa: S608
 
     attacken = _attacken_je_pokemon(conn, tag, kampfformat)
 

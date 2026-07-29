@@ -27,6 +27,7 @@ import pandas as pd
 from ..config import ALLE_TYPEN, STANDARD_KAMPFFORMAT
 from ..etl.transform import faehigkeit_klasse
 from ..typechart import eingehender_multiplikator
+from . import saison
 
 
 def angriffstyp_haeufigkeit(conn: sqlite3.Connection, tag: str,
@@ -38,7 +39,7 @@ def angriffstyp_haeufigkeit(conn: sqlite3.Connection, tag: str,
     Attacke hat. Status-Attacken bleiben unberuecksichtigt, weil sie keinen
     typbasierten Schaden verursachen.
     """
-    df = pd.read_sql("""
+    df = pd.read_sql(saison.anwenden("""
         SELECT m.attacke_typ, u.rang_perzentil, m.anteil
         FROM V_Merkmal m
         JOIN V_Usage   u ON u.pokemon_sk = m.pokemon_sk AND u.zeit_sk = m.zeit_sk
@@ -48,7 +49,7 @@ def angriffstyp_haeufigkeit(conn: sqlite3.Connection, tag: str,
           AND m.saison_aktuell = 1
           AND m.attacke_kategorie IN ('physical', 'special')
           AND m.attacke_typ IS NOT NULL AND m.attacke_typ != ''
-    """, conn, params=(tag, kampfformat))
+    """, conn), conn, params=(tag, kampfformat))
 
     if df.empty:
         return pd.DataFrame({"angriffstyp": ALLE_TYPEN, "haeufigkeit": 0.0,
@@ -154,13 +155,13 @@ def offensive_abdeckung(conn: sqlite3.Connection, namen: list[str], tag: str,
                                      "bewertung"])
 
     platzhalter = ",".join("?" * len(namen))
-    attacken = pd.read_sql(f"""
+    attacken = pd.read_sql(saison.anwenden(f"""
         SELECT DISTINCT anzeigename, bezeichnung AS attacke, attacke_typ
         FROM V_Merkmal
         WHERE kategorie = 'move' AND anzeigename IN ({platzhalter})
           AND datum_iso = ? AND kampfformat = ? AND saison_aktuell = 1
           AND attacke_kategorie IN ('physical', 'special') AND anteil >= 15
-    """, conn, params=(*namen, tag, kampfformat))  # noqa: S608
+    """, conn), conn, params=(*namen, tag, kampfformat))  # noqa: S608
 
     if attacken.empty:
         return pd.DataFrame(columns=["verteidigungstyp", "beste_wirkung", "anzahl_angreifer",
@@ -208,7 +209,7 @@ def bedrohungsindex(conn: sqlite3.Connection, team: pd.DataFrame, tag: str,
 
     # Statuswerte des jeweils gaengigsten Sets; ohne Set die Werte auf Stufe 50
     # ohne Investition.
-    meta = pd.read_sql("""
+    meta = pd.read_sql(saison.anwenden("""
         SELECT u.pokemon_sk, u.pokedex_id, u.anzeigename, u.typ1, u.typ2,
                u.typ_kombination, u.rang, u.rang_perzentil,
                COALESCE(m.wert_attack,    u.stufe50_attack)    AS attack,
@@ -221,19 +222,19 @@ def bedrohungsindex(conn: sqlite3.Connection, team: pd.DataFrame, tag: str,
               AND m.kategorie = 'spread' AND m.rang = 1
         WHERE u.datum_iso = ? AND u.kampfformat = ? AND u.saison_aktuell = 1
           AND u.rang <= 80
-    """, conn, params=(tag, kampfformat))
+    """, conn), conn, params=(tag, kampfformat))
     if meta.empty:
         return pd.DataFrame(columns=["anzeigename", "typ_kombination", "rang",
                                      "bedrohungswert", "gefaehrdet", "beste_attacke"])
 
-    attacken = pd.read_sql("""
+    attacken = pd.read_sql(saison.anwenden("""
         SELECT pokemon_sk, bezeichnung AS attacke, attacke_typ,
                attacke_kategorie AS kategorie, basisschaden, anteil
         FROM V_Merkmal
         WHERE kategorie = 'move' AND datum_iso = ? AND kampfformat = ?
           AND saison_aktuell = 1 AND attacke_kategorie IN ('physical', 'special')
           AND anteil >= 20 AND attacke_typ IS NOT NULL
-    """, conn, params=(tag, kampfformat))
+    """, conn), conn, params=(tag, kampfformat))
     attacken_je_pokemon = dict(list(attacken.groupby("pokemon_sk")))
 
     eigene_spalten = team.copy()
@@ -319,21 +320,21 @@ def strategie_radar(conn: sqlite3.Connection, namen: list[str], tag: str,
         return []
 
     platzhalter = ",".join("?" * len(namen))
-    attacken = pd.read_sql(f"""
+    attacken = pd.read_sql(saison.anwenden(f"""
         SELECT anzeigename, bezeichnung AS attacke, taktik_klasse, anteil
         FROM V_Merkmal
         WHERE kategorie = 'move' AND anzeigename IN ({platzhalter})
           AND datum_iso = ? AND kampfformat = ? AND saison_aktuell = 1
           AND anteil >= 15 AND taktik_klasse IS NOT NULL
-    """, conn, params=(*namen, tag, kampfformat))  # noqa: S608
+    """, conn), conn, params=(*namen, tag, kampfformat))  # noqa: S608
 
-    roh_faehigkeiten = pd.read_sql(f"""
+    roh_faehigkeiten = pd.read_sql(saison.anwenden(f"""
         SELECT anzeigename, bezeichnung AS faehigkeit, anteil
         FROM V_Merkmal
         WHERE kategorie = 'ability' AND anzeigename IN ({platzhalter})
           AND datum_iso = ? AND kampfformat = ? AND saison_aktuell = 1
           AND anteil >= 40
-    """, conn, params=(*namen, tag, kampfformat))  # noqa: S608
+    """, conn), conn, params=(*namen, tag, kampfformat))  # noqa: S608
 
     # Die Effektklasse ist eine Anreicherung; die Quelle liefert nur den Namen.
     faehigkeiten = roh_faehigkeiten.assign(

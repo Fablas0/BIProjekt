@@ -40,6 +40,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from . import saison
+
 
 @dataclass(frozen=True)
 class Merkmal:
@@ -160,7 +162,7 @@ def lade_wuerfel(conn: sqlite3.Connection) -> pd.DataFrame:
     Speicher auszufuehren, als je Interaktion erneut zu verknuepfen.
     """
     wuerfel = pd.read_sql(
-        "SELECT * FROM V_Usage WHERE saison_aktuell = 1", conn)
+        saison.anwenden("SELECT * FROM V_Usage WHERE saison_aktuell = 1", conn), conn)
     return _zeitachse_ordnen(wuerfel)
 
 

@@ -381,7 +381,29 @@ WHERE m.saison_aktuell = 1;
 """
 
 
-def verbindung(pfad: Path | str | None = None) -> sqlite3.Connection:
+class Verbindung(sqlite3.Connection):
+    """Datenbankverbindung, die die gewaehlte Saison mitfuehrt.
+
+    Die Analyseschicht filtert jede Abfrage auf eine Saison. Diese Auswahl ist
+    eine Entscheidung der Oberflaeche, nicht der Abfrage -- sie als Parameter
+    durch ueber zwanzig Funktionen zu reichen haette jede Signatur und jede
+    Aufrufstelle beruehrt, ohne dass eine davon inhaltlich etwas mit der Wahl
+    zu tun hat.
+
+    ``sqlite3.Connection`` nimmt von sich aus keine zusaetzlichen Merkmale auf;
+    die Ableitung schafft genau eines. ``None`` bedeutet "die laufende Saison"
+    und ist damit das bisherige Verhalten.
+
+    Zu beachten: die Verbindung wird von der Anwendung gemeinsam genutzt. Bei
+    mehreren gleichzeitigen Betrachtern mit unterschiedlicher Saisonwahl waere
+    sie zu trennen -- fuer den vorliegenden Einsatz mit einer Handvoll Nutzern
+    ist das nicht erforderlich.
+    """
+
+    saison_wahl: str | None = None
+
+
+def verbindung(pfad: Path | str | None = None) -> Verbindung:
     """Oeffnet eine DWH-Verbindung und legt das Schema bei Bedarf an.
 
     ``check_same_thread=False`` ist noetig, weil Streamlit Callbacks in wechselnden
@@ -393,7 +415,8 @@ def verbindung(pfad: Path | str | None = None) -> sqlite3.Connection:
         datenverzeichnis_anlegen()
         ziel.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(ziel), check_same_thread=False, timeout=30)
+    conn = sqlite3.connect(str(ziel), check_same_thread=False, timeout=30,
+                           factory=Verbindung)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")

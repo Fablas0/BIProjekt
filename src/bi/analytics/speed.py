@@ -31,6 +31,7 @@ from ..stats import (
     handelt_zuerst,
     initiative_im_szenario,
 )
+from . import saison
 
 
 def speed_tier_liste(conn: sqlite3.Connection, tag: str,
@@ -48,7 +49,7 @@ def speed_tier_liste(conn: sqlite3.Connection, tag: str,
     Da die Quelle die Nutzung nur als Rang liefert, dient das Rangperzentil als
     Praesenzmass -- eine abgeleitete Groesse, ausdruecklich keine Nutzungsquote.
     """
-    df = pd.read_sql("""
+    df = pd.read_sql(saison.anwenden("""
         SELECT m.anzeigename, m.pokedex_id, m.typ1, m.typ2,
                p.stufe50_speed AS speed_ohne_investition,
                m.bezeichnung AS kurzform, m.wesen, m.punkte_speed,
@@ -64,7 +65,7 @@ def speed_tier_liste(conn: sqlite3.Connection, tag: str,
           AND m.saison_aktuell = 1 AND u.rang <= ? AND m.anteil >= ?
           AND m.wert_speed IS NOT NULL
         ORDER BY m.wert_speed DESC
-    """, conn, params=(tag, kampfformat, ranggrenze, mindest_spread_anteil))
+    """, conn), conn, params=(tag, kampfformat, ranggrenze, mindest_spread_anteil))
 
     if df.empty:
         return df
@@ -146,7 +147,7 @@ def team_einordnung(conn: sqlite3.Connection, namen: list[str], tag: str,
 
     tiers = speed_tier_liste(conn, tag, kampfformat)
     platzhalter = ",".join("?" * len(namen))
-    eigene = pd.read_sql(f"""
+    eigene = pd.read_sql(saison.anwenden(f"""
         SELECT m.anzeigename, m.bezeichnung AS kurzform, m.wesen,
                m.wert_speed AS speed_real, m.anteil,
                p.stufe50_speed AS speed_ohne_investition
@@ -155,7 +156,7 @@ def team_einordnung(conn: sqlite3.Connection, namen: list[str], tag: str,
         WHERE m.anzeigename IN ({platzhalter}) AND m.datum_iso = ?
           AND m.kampfformat = ? AND m.kategorie = 'spread' AND m.rang = 1
           AND m.saison_aktuell = 1 AND m.wert_speed IS NOT NULL
-    """, conn, params=(*namen, tag, kampfformat))  # noqa: S608
+    """, conn), conn, params=(*namen, tag, kampfformat))  # noqa: S608
 
     if eigene.empty or tiers.empty:
         return pd.DataFrame(columns=["Pokemon", "Set", "Ohne Investition", "Initiative",
@@ -188,7 +189,7 @@ def benchmark(conn: sqlite3.Connection, angreifer_name: str, ziel_name: str,
     verbleibenden Statuspunkte stehen fuer Widerstandsfaehigkeit oder
     Durchschlagskraft zur Verfuegung.
     """
-    daten = pd.read_sql("""
+    daten = pd.read_sql(saison.anwenden("""
         SELECT m.anzeigename, p.speed AS basiswert, m.wert_speed AS speed_real,
                m.bezeichnung AS kurzform, m.anteil
         FROM V_Merkmal m
@@ -196,7 +197,7 @@ def benchmark(conn: sqlite3.Connection, angreifer_name: str, ziel_name: str,
         WHERE m.datum_iso = ? AND m.kampfformat = ? AND m.anzeigename IN (?, ?)
           AND m.kategorie = 'spread' AND m.rang = 1 AND m.saison_aktuell = 1
           AND m.wert_speed IS NOT NULL
-    """, conn, params=(tag, kampfformat, angreifer_name, ziel_name))
+    """, conn), conn, params=(tag, kampfformat, angreifer_name, ziel_name))
 
     angreifer = daten[daten["anzeigename"] == angreifer_name]
     ziel = daten[daten["anzeigename"] == ziel_name]

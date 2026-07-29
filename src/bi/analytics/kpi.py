@@ -35,10 +35,16 @@ import sqlite3
 import pandas as pd
 
 from ..config import STANDARD_KAMPFFORMAT
+from . import saison
 
 
 def _lese(conn: sqlite3.Connection, sql: str, parameter: tuple = ()) -> pd.DataFrame:
-    return pd.read_sql(sql, conn, params=parameter)
+    """Leseabfrage, auf die gewaehlte Saison eingeschraenkt.
+
+    Die Einschraenkung geschieht hier zentral, damit keine Abfrage sie
+    versehentlich auslaesst -- siehe :mod:`bi.analytics.saison`.
+    """
+    return pd.read_sql(saison.anwenden(sql, conn), conn, params=parameter)
 
 
 # --------------------------------------------------------------------------
@@ -48,15 +54,15 @@ def _lese(conn: sqlite3.Connection, sql: str, parameter: tuple = ()) -> pd.DataF
 def verfuegbare_tage(conn: sqlite3.Connection, kampfformat: str = STANDARD_KAMPFFORMAT
                      ) -> list[str]:
     """Alle Tage mit Bewegungsdaten der laufenden Saison, aufsteigend."""
-    return [z[0] for z in conn.execute("""
+    return [z[0] for z in conn.execute(saison.anwenden("""
         SELECT DISTINCT z.datum_iso
         FROM Fact_Champions_Usage f
         JOIN Dim_Zeit        z ON z.zeit_sk        = f.zeit_sk
         JOIN Dim_Kampfformat k ON k.kampfformat_sk = f.kampfformat_sk
         JOIN Dim_Saison      s ON s.saison_sk      = f.saison_sk
-        WHERE k.schluessel = ? AND s.ist_aktuell = 1
+        WHERE k.schluessel = ? AND s.saison_aktuell = 1
         ORDER BY z.datum_iso
-    """, (kampfformat,))]
+    """, conn), (kampfformat,))]
 
 
 def aktueller_tag(conn: sqlite3.Connection,
@@ -77,7 +83,7 @@ def verfuegbare_formate(conn: sqlite3.Connection) -> list[str]:
 
 def datenbasis(conn: sqlite3.Connection) -> dict[str, object]:
     """Beschreibung der geladenen Datenbasis fuer die Kopfzeile des Cockpits."""
-    zeile = conn.execute("""
+    zeile = conn.execute(saison.anwenden("""
         SELECT s.schluessel AS saison, s.bezeichnung, s.beginn, s.ende,
                q.name AS quelle, q.messniveau_nutzung,
                COUNT(DISTINCT z.datum_iso) AS tage
@@ -85,9 +91,9 @@ def datenbasis(conn: sqlite3.Connection) -> dict[str, object]:
         JOIN Dim_Saison s ON s.saison_sk = f.saison_sk
         JOIN Dim_Quelle q ON q.quelle_sk = f.quelle_sk
         JOIN Dim_Zeit   z ON z.zeit_sk   = f.zeit_sk
-        WHERE s.ist_aktuell = 1
+        WHERE s.saison_aktuell = 1
         GROUP BY s.schluessel, s.bezeichnung, s.beginn, s.ende, q.name, q.messniveau_nutzung
-    """).fetchone()
+    """, conn)).fetchone()
     return dict(zeile) if zeile else {}
 
 
@@ -292,11 +298,11 @@ def top_n_fluktuation(conn: sqlite3.Connection, tag_a: str, tag_b: str,
     bedeutet eine unveraenderte Spitzengruppe.
     """
     def besten(tag: str) -> set[str]:
-        return {z[0] for z in conn.execute("""
+        return {z[0] for z in conn.execute(saison.anwenden("""
             SELECT anzeigename FROM V_Usage
             WHERE datum_iso = ? AND kampfformat = ? AND saison_aktuell = 1
               AND rang <= ?
-        """, (tag, kampfformat, n))}
+        """, conn), (tag, kampfformat, n))}
 
     return len(besten(tag_b) - besten(tag_a))
 

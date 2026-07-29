@@ -22,7 +22,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from bi import warehouse  # noqa: E402
-from bi.analytics import kpi  # noqa: E402
+from bi.analytics import kpi, saison  # noqa: E402
 from bi.config import QUELLE_VORHALTUNG_TAGE  # noqa: E402
 from bi.ui import (  # noqa: E402
     design,
@@ -109,9 +109,53 @@ def main() -> None:
         seite = _navigation()
         st.markdown("---")
 
+        _saisonauswahl()
         _zeige_status()
 
     SEITEN[seite]()
+
+
+def _saisonauswahl() -> None:
+    """Auswahl der auszuwertenden Saison.
+
+    Ohne sie waere die archivierte Historie verloren, sobald Pokemon Champions
+    eine neue Saison eroeffnet: die vorige verliert dann ihr Aktuell-Kennzeichen,
+    und saemtliche Auswertungen filterten sie heraus. Die Daten blieben in
+    Datenbank und Archiv liegen, waeren aber nicht mehr erreichbar -- ausgerechnet
+    jene, deren Sicherung der Zweck des Archivs ist.
+
+    Die Wahl reist an der Verbindung mit (:class:`bi.warehouse.Verbindung`) und
+    wirkt damit auf jede Abfrage der Analyseschicht.
+    """
+    try:
+        conn = komponenten.hole_verbindung()
+        saisons = saison.verfuegbare(conn)
+    except Exception:  # noqa: BLE001 -- der Statusblock meldet den Fehler
+        return
+
+    if not saisons:
+        return
+
+    schluessel = [s.schluessel for s in saisons]
+    beschriftung = {s.schluessel: s.anzeige for s in saisons}
+
+    if len(saisons) == 1:
+        # Eine einzige Saison: ein Auswahlfeld waere blosse Zierde.
+        st.markdown("**Saison**")
+        st.caption(beschriftung[schluessel[0]])
+        conn.saison_wahl = None
+        return
+
+    gewaehlt = st.selectbox(
+        "Saison", schluessel, format_func=lambda s: beschriftung[s],
+        key="saison_wahl",
+        help="Aeltere Saisons stammen aus dem Archiv und sind bei der Quelle "
+             "nicht mehr abrufbar.",
+    )
+    # None bedeutet "die laufende" -- so bleibt das Verhalten unveraendert,
+    # wenn die laufende Saison ohnehin gewaehlt ist.
+    conn.saison_wahl = None if saisons[0].schluessel == gewaehlt else gewaehlt
+    komponenten.zwischenspeicher_leeren()
 
 
 def _zeige_status() -> None:

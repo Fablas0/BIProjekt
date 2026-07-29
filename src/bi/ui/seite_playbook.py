@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from ..analytics import kpi
+from ..analytics import kpi, saison
 from ..etl.transform import faehigkeit_klasse
 from .komponenten import hinweis_leere_datenbank, hole_verbindung, kopfauswahl, seitenkopf
 
@@ -176,23 +176,23 @@ def _archetyp_verbreitung(conn, monat: str, kampfformat: str) -> pd.DataFrame:
     es eine entsprechende Attacke bzw. Faehigkeit in mindestens 15 Prozent seiner
     Sets fuehrt.
     """
-    attacken = pd.read_sql("""
+    attacken = pd.read_sql(saison.anwenden("""
         SELECT m.taktik_klasse, m.anzeigename, u.rang_perzentil
         FROM V_Merkmal m
         JOIN V_Usage u ON u.pokemon_sk = m.pokemon_sk AND u.zeit_sk = m.zeit_sk
                       AND u.kampfformat_sk = m.kampfformat_sk AND u.saison_sk = m.saison_sk
         WHERE m.kategorie = 'move' AND m.datum_iso = ? AND m.kampfformat = ?
           AND m.saison_aktuell = 1 AND m.anteil >= 15 AND m.taktik_klasse IS NOT NULL
-    """, conn, params=(monat, kampfformat))
+    """, conn), conn, params=(monat, kampfformat))
 
-    roh = pd.read_sql("""
+    roh = pd.read_sql(saison.anwenden("""
         SELECT m.anzeigename, m.bezeichnung AS faehigkeit, u.rang_perzentil
         FROM V_Merkmal m
         JOIN V_Usage u ON u.pokemon_sk = m.pokemon_sk AND u.zeit_sk = m.zeit_sk
                       AND u.kampfformat_sk = m.kampfformat_sk AND u.saison_sk = m.saison_sk
         WHERE m.kategorie = 'ability' AND m.datum_iso = ? AND m.kampfformat = ?
           AND m.saison_aktuell = 1 AND m.anteil >= 40
-    """, conn, params=(monat, kampfformat))
+    """, conn), conn, params=(monat, kampfformat))
     # Die Effektklasse ist eine Anreicherung; die Quelle liefert nur den Namen.
     faehigkeiten = roh.assign(effekt_klasse=roh["faehigkeit"].map(faehigkeit_klasse))
 
