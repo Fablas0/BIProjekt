@@ -1,0 +1,187 @@
+"""Oberflaechentests mit Streamlits AppTest-Rahmen.
+
+Die Tests fuehren die vollstaendige Anwendung im Prozess aus und pruefen, dass
+jede Seite fehlerfrei rendert -- auch mit ausgewaehltem Team, also auf den
+Codepfaden, die erst durch eine Benutzereingabe erreicht werden.
+
+Die Tests benoetigen ein befuelltes Data Warehouse. Ist keines vorhanden, werden
+sie uebersprungen: der Aufbau erfordert Zugriff auf beide Quellsysteme und
+gehoert nicht in einen Testlauf ohne Netzverbindung.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+
+WURZEL = Path(__file__).resolve().parents[1]
+DWH = Path(os.getenv("VGC_BI_DB", WURZEL / "data" / "vgc_dwh.db"))
+
+pytestmark = pytest.mark.skipif(
+    not DWH.exists(),
+    reason="Kein befuelltes Data Warehouse vorhanden -- Oberflaechentests uebersprungen.",
+)
+
+SEITEN = [
+    "Meta-Cockpit",
+    "Team-Preview-Advisor",
+    "Gegner-Scouting",
+    "Team-Builder",
+    "Speed-Tiers",
+    "OLAP-Explorer",
+    "Meta-Playbook",
+    "ETL & Datenqualitaet",
+]
+
+
+def _starte(seite: str | None = None):
+    """Fuehrt die Anwendung aus und waehlt optional eine Seite an."""
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(WURZEL / "app.py"), default_timeout=180)
+    app.run()
+    if seite and seite != SEITEN[0]:
+        app.radio[0].set_value(seite).run()
+    return app
+
+
+@pytest.mark.parametrize("seite", SEITEN)
+def test_seite_rendert_ohne_fehler(seite: str) -> None:
+    """Jede Seite muss ohne unbehandelte Ausnahme rendern."""
+    app = _starte(seite)
+    assert not app.exception, f"Ausnahme auf Seite '{seite}': {app.exception}"
+
+
+def test_scouting_mit_team() -> None:
+    """Die Scouting-Analyse muss auch mit ausgewaehltem Team durchlaufen.
+
+    Erst mit einer Auswahl werden Defensivprofil, Bedrohungsindex und
+    Strategie-Radar tatsaechlich ausgefuehrt.
+    """
+    app = _starte("Gegner-Scouting")
+    auswahl = app.multiselect[0]
+    assert auswahl.options, "Keine Pokemon zur Auswahl -- ist das DWH befuellt?"
+
+    app.multiselect[0].set_value(auswahl.options[:4]).run()
+    assert not app.exception, f"Ausnahme bei der Teamanalyse: {app.exception}"
+
+    # Alle Registerkarten der Analyse muessen angelegt worden sein.
+    assert app.tabs, "Die Analyse hat keine Registerkarten erzeugt."
+
+
+def test_teambuilder_mit_team() -> None:
+    """Der Team-Builder muss Vorschlaege und Bewertungen erzeugen."""
+    app = _starte("Team-Builder")
+    auswahl = app.multiselect[0]
+    assert auswahl.options
+
+    app.multiselect[0].set_value(auswahl.options[:3]).run()
+    assert not app.exception, f"Ausnahme im Team-Builder: {app.exception}"
+
+
+def test_olap_drill_down_und_pivot() -> None:
+    """Drill-Down, Roll-Up und Pivot muessen den Wuerfel neu verdichten."""
+    app = _starte("OLAP-Explorer")
+    assert not app.exception
+
+    beschriftungen = [b.label for b in app.button]
+    for aktion in ("Roll-Up", "Drill-Down", "Pivot"):
+        assert aktion in beschriftungen, f"Schaltflaeche '{aktion}' fehlt."
+
+    # Roll-Up von 'Pokemon (Form)' auf 'Spezies' und erneut auf 'Generation'.
+    for _ in range(2):
+        knopf = next((b for b in app.button if b.label == "Roll-Up" and not b.disabled), None)
+        if knopf is None:
+            break
+        knopf.click().run()
+        assert not app.exception, f"Ausnahme beim Roll-Up: {app.exception}"
+
+    pivot = next((b for b in app.button if b.label == "Pivot" and not b.disabled), None)
+    if pivot is not None:
+        pivot.click().run()
+        assert not app.exception, f"Ausnahme beim Pivot: {app.exception}"
+
+
+def test_speedtiers_mit_team_und_szenario() -> None:
+    """Die Speed-Tier-Seite muss mit Team und gewechseltem Szenario durchlaufen.
+
+    Erst mit einer Auswahl werden Einordnung, Szenarienvergleich und
+    Benchmark-Rechner tatsaechlich ausgefuehrt.
+    """
+    app = _starte("Speed-Tiers")
+    assert not app.exception, f"Ausnahme beim Aufbau: {app.exception}"
+
+    auswahl = app.multiselect(key="speed_team")
+    assert auswahl.options, "Keine Pokemon zur Auswahl -- ist das DWH befuellt?"
+
+    app.multiselect(key="speed_team").set_value(auswahl.options[:3]).run()
+    assert not app.exception, f"Ausnahme mit Team: {app.exception}"
+
+    # Das Auswahlfeld meldet die formatierten Beschriftungen, nicht die Schluessel.
+    szenario = app.selectbox(key="speed_vergleich_szenario")
+    assert any("Bizarroraum" in o for o in szenario.options), "Bizarroraum fehlt."
+
+    for suchbegriff in ("Rueckenwind (eigene", "Bizarroraum", "Eissturm"):
+        beschriftung = next(o for o in szenario.options if suchbegriff in o)
+        app.selectbox(key="speed_vergleich_szenario").set_value(beschriftung).run()
+        assert not app.exception, (
+            f"Ausnahme im Szenario '{beschriftung}': {app.exception}"
+        )
+
+
+def test_speedtiers_benchmark_rechner() -> None:
+    """Der Benchmark-Rechner muss zwei verschiedene Pokemon verarbeiten."""
+    app = _starte("Speed-Tiers")
+    angreifer = app.selectbox(key="bench_angreifer")
+    assert len(angreifer.options) >= 2
+
+    app.selectbox(key="bench_angreifer").set_value(angreifer.options[0]).run()
+    app.selectbox(key="bench_ziel").set_value(angreifer.options[1]).run()
+    assert not app.exception, f"Ausnahme im Benchmark-Rechner: {app.exception}"
+
+
+def test_preview_advisor_mit_zwei_teams() -> None:
+    """Der Advisor muss beide Teams bewerten und eine Empfehlung erzeugen."""
+    app = _starte("Team-Preview-Advisor")
+    assert not app.exception, f"Ausnahme beim Aufbau: {app.exception}"
+
+    eigene = app.multiselect(key="preview_eigene")
+    assert len(eigene.options) >= 12, "Zu wenige Champions-Pokemon fuer den Test."
+
+    app.multiselect(key="preview_eigene").set_value(eigene.options[:6]).run()
+    app.multiselect(key="preview_gegner").set_value(eigene.options[6:12]).run()
+    assert not app.exception, f"Ausnahme bei der Bewertung: {app.exception}"
+
+    # Mit vollstaendigen Teams entstehen die Registerkarten der Auswertung.
+    assert app.tabs, "Die Auswertung hat keine Registerkarten erzeugt."
+
+
+def test_preview_advisor_einzelkampf() -> None:
+    """Im Einzelkampf werden drei statt vier Pokemon mitgenommen."""
+    app = _starte("Team-Preview-Advisor")
+    app.selectbox(key="preview_format").set_value("Singles").run()
+    assert not app.exception, f"Ausnahme beim Formatwechsel: {app.exception}"
+
+    eigene = app.multiselect(key="preview_eigene")
+    if len(eigene.options) < 12:
+        pytest.skip("Zu wenige Singles-Daten fuer den Test.")
+
+    app.multiselect(key="preview_eigene").set_value(eigene.options[:6]).run()
+    app.multiselect(key="preview_gegner").set_value(eigene.options[6:12]).run()
+    assert not app.exception, f"Ausnahme im Einzelkampf: {app.exception}"
+
+
+def test_olap_slice_filtert_wuerfel() -> None:
+    """Ein Slice auf der Zeitdimension muss den Teilwuerfel verkleinern."""
+    app = _starte("OLAP-Explorer")
+    monatsfilter = next(
+        (m for m in app.multiselect if "Zeitraum" in (m.label or "")), None
+    )
+    assert monatsfilter is not None, "Zeitfilter nicht gefunden."
+    assert len(monatsfilter.options) > 1, "Fuer den Test werden mehrere Monate benoetigt."
+
+    app.multiselect(key="olap_filter_tag_label").set_value(
+        [monatsfilter.options[0]]).run()
+    assert not app.exception, f"Ausnahme beim Slice: {app.exception}"

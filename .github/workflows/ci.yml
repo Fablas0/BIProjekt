@@ -1,0 +1,84 @@
+name: CI
+
+# Qualitaetssicherung bei jeder Aenderung: statische Pruefung, Tests und ein
+# Integrationslauf gegen die echten Quellsysteme.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Statische Codepruefung
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhaengigkeiten installieren
+        run: pip install -r requirements-dev.txt
+
+      - name: Ruff (Linting und Importsortierung)
+        run: ruff check .
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Abhaengigkeiten installieren
+        run: pip install -r requirements-dev.txt
+
+      - name: Unit- und Integrationstests
+        # Die Oberflaechentests ueberspringen sich selbst, solange kein
+        # befuelltes Data Warehouse vorliegt.
+        run: pytest -q --tb=short
+
+  etl-integration:
+    name: ETL gegen die Quellsysteme
+    runs-on: ubuntu-latest
+    # Nur auf dem Hauptzweig: der Lauf greift auf externe Dienste zu und soll
+    # Pull Requests nicht von deren Verfuegbarkeit abhaengig machen.
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhaengigkeiten installieren
+        run: pip install -r requirements-dev.txt
+
+      - name: Data Warehouse aufbauen
+        run: python -m scripts.etl_lauf --max-tage 3
+
+      - name: Datenqualitaet pruefen
+        # Bricht ab, wenn der Qualitaetsindex unter den Schwellwert faellt.
+        run: python -m scripts.qualitaet_pruefen --mindestindex 90
+
+      - name: Oberflaechentests gegen das befuellte Warehouse
+        run: pytest tests/test_oberflaeche.py -q --tb=short
+
+      - name: Data Warehouse als Artefakt sichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: vgc-dwh
+          path: data/vgc_dwh.db
+          retention-days: 7

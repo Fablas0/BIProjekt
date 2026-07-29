@@ -1,0 +1,53 @@
+name: Taeglicher ETL-Lauf
+
+# Operationalisierung des Ladeprozesses.
+#
+# Pokemon Champions haelt nur rund zwei Wochen Tagesstaende vor. Faellt ein Tag
+# aus der Quelle, ist er endgueltig verloren. Der Lauf muss deshalb **taeglich**
+# erfolgen -- er sichert jeden neuen Tag im Archiv und laesst die Zeitreihe damit
+# ueber die Vorhaltezeit der Quelle hinauswachsen.
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    name: Data Warehouse neu aufbauen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhaengigkeiten installieren
+        run: pip install -r requirements.txt
+
+      - name: ETL ausfuehren
+        run: |
+          python -m scripts.etl_lauf \
+            --elo "${{ github.event.inputs.elo || '1760' }}" \
+            --monate "${{ github.event.inputs.monate || '6' }}"
+
+      - name: Qualitaetstor
+        run: python -m scripts.qualitaet_pruefen --mindestindex 90
+
+      - name: Data Warehouse mit Archiv sichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: vgc-dwh
+          path: data/vgc_dwh.db
+          retention-days: 90
+          overwrite: true
+
+      - name: Zusammenfassung im Lauf hinterlegen
+        if: always()
+        run: |
+          {
+            echo "## Taeglicher ETL-Lauf"
+            echo ""
+            python -m scripts.qualitaet_pruefen --mindestindex 0 || true
+          } >> "$GITHUB_STEP_SUMMARY"
