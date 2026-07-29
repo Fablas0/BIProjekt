@@ -16,6 +16,13 @@ PROJEKT_WURZEL = Path(__file__).resolve().parents[2]
 DATEN_VERZEICHNIS = Path(os.getenv("VGC_BI_DATA_DIR", PROJEKT_WURZEL / "data"))
 DWH_PFAD = Path(os.getenv("VGC_BI_DB", DATEN_VERZEICHNIS / "vgc_dwh.db"))
 
+# Das Rohdatenarchiv liegt bewusst NEBEN dem Datenverzeichnis, nicht darin:
+# ``data/`` ist von der Versionsverwaltung ausgeschlossen, und git steigt in ein
+# ausgeschlossenes Verzeichnis gar nicht erst hinab -- eine Wiedereinschluss-Regel
+# darunter waere wirkungslos. Das Archiv muss aber versioniert werden, weil die
+# Quelle nur rund zwei Wochen vorhaelt.
+ARCHIV_VERZEICHNIS = Path(os.getenv("VGC_BI_ARCHIV", PROJEKT_WURZEL / "archiv"))
+
 # --------------------------------------------------------------------------
 # Quellsysteme
 # --------------------------------------------------------------------------

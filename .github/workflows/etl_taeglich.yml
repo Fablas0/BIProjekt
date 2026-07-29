@@ -1,19 +1,32 @@
 name: Taeglicher ETL-Lauf
 
-# Operationalisierung des Ladeprozesses.
+# Betriebslauf, getrennt von der Pruefpipeline in ci.yml.
 #
 # Pokemon Champions haelt nur rund zwei Wochen Tagesstaende vor. Faellt ein Tag
-# aus der Quelle, ist er endgueltig verloren. Der Lauf muss deshalb **taeglich**
-# erfolgen -- er sichert jeden neuen Tag im Archiv und laesst die Zeitreihe damit
-# ueber die Vorhaltezeit der Quelle hinauswachsen.
+# aus der Quelle, ist er endgueltig verloren. Der Lauf sichert deshalb taeglich
+# die Rohnutzlast des neuen Tages.
+#
+# Was hier archiviert wird, sind ausschliesslich die **Rohdaten** -- nicht die
+# Datenbank. Das Data Warehouse ist daraus jederzeit neu ableitbar, die
+# Rohnutzlast dagegen nicht wiederbeschaffbar. Gemessen fallen rund 0,3 MB je
+# Tag an (gzip-komprimiert), also etwa 110 MB im Jahr.
 on:
   schedule:
     - cron: "0 5 * * *"
   workflow_dispatch:
+    inputs:
+      max_tage:
+        description: "Nur die juengsten N Tage abrufen (leer = alle verfuegbaren)"
+        required: false
+        default: ""
+
+# Der Job schreibt das Archiv in das Repository zurueck.
+permissions:
+  contents: write
 
 jobs:
-  refresh:
-    name: Data Warehouse neu aufbauen
+  archivieren:
+    name: Tagesstand sichern
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,22 +39,52 @@ jobs:
       - name: Abhaengigkeiten installieren
         run: pip install -r requirements.txt
 
+      # Anders als in der Pruefpipeline faerbt ein Quellausfall (Exit 75) diesen
+      # Lauf bewusst rot: ein nicht abgeholter Tag ist nach der Vorhaltezeit
+      # endgueltig verloren, das muss auffallen.
       - name: ETL ausfuehren
+        id: etl
+        env:
+          MAX_TAGE: ${{ inputs.max_tage }}
         run: |
-          python -m scripts.etl_lauf \
-            --elo "${{ github.event.inputs.elo || '1760' }}" \
-            --monate "${{ github.event.inputs.monate || '6' }}"
+          if [ -n "$MAX_TAGE" ]; then
+            python -m scripts.etl_lauf --max-tage "$MAX_TAGE"
+          else
+            python -m scripts.etl_lauf
+          fi
+
+      - name: Rohdaten exportieren
+        # Laeuft auch nach einem Teilfehler: was geladen wurde, soll gesichert
+        # werden. Der Export ist deterministisch sortiert, damit unveraenderte
+        # Tage keinen neuen Commit erzeugen.
+        if: always()
+        run: python -m scripts.archiv_export
+
+      - name: Archiv festschreiben
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all archiv
+          if git diff --cached --quiet; then
+            echo "Keine neuen Tagesstaende -- nichts festzuschreiben."
+            exit 0
+          fi
+          git commit -m "Archiv: Tagesstand $(date -u +%Y-%m-%d) gesichert"
+          # Ein zwischenzeitlicher Push auf main darf den Archiv-Commit nicht
+          # verwerfen; deshalb rebasen und erneut versuchen.
+          for versuch in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && \
+              git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "Push-Versuch $versuch fehlgeschlagen, erneut ..."
+            sleep 5
+          done
+          exit 1
 
       - name: Qualitaetstor
+        # Erst nach der Sicherung: ein Qualitaetsmangel darf nicht dazu fuehren,
+        # dass ein unwiederbringlicher Tagesstand verloren geht.
         run: python -m scripts.qualitaet_pruefen --mindestindex 90
-
-      - name: Data Warehouse mit Archiv sichern
-        uses: actions/upload-artifact@v4
-        with:
-          name: vgc-dwh
-          path: data/vgc_dwh.db
-          retention-days: 90
-          overwrite: true
 
       - name: Zusammenfassung im Lauf hinterlegen
         if: always()
@@ -49,5 +92,7 @@ jobs:
           {
             echo "## Taeglicher ETL-Lauf"
             echo ""
+            echo '```'
             python -m scripts.qualitaet_pruefen --mindestindex 0 || true
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -29,6 +29,7 @@ nicht ueber die Fleisspunkte-Formel der Smogon-Strecke.
 from __future__ import annotations
 
 import csv
+import gzip
 import io
 import json
 import sqlite3
@@ -36,6 +37,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -392,6 +394,98 @@ def archiviere(conn: sqlite3.Connection, abzuege: list[Tagesabzug], lauf_id: int
     return conn.total_changes
 
 
+def exportiere_archiv(conn: sqlite3.Connection, ziel: Path) -> dict[str, int]:
+    """Schreibt das Rohdatenarchiv als versionierbare Dateien auf die Platte.
+
+    Je Saison, Tag und Kampfformat entsteht eine gzip-komprimierte
+    NDJSON-Datei. Diese Form ist bewusst gewaehlt:
+
+    * **Zeilenweise** -- ein Satz je Zeile, damit Aenderungen lesbar bleiben.
+    * **Deterministisch sortiert** -- ein unveraenderter Tag erzeugt eine
+      bytegleiche Datei und damit keinen neuen Commit.
+    * **Komprimiert** -- gemessen rund 0,3 MB je Tag statt 6,5 MB roh; git
+      komprimiert diese Tagesstaende von sich aus nicht nennenswert weiter.
+
+    Die Datenbank selbst wird nicht gesichert: sie ist aus diesen Dateien
+    jederzeit neu ableitbar, die Rohnutzlast dagegen nicht wiederbeschaffbar.
+    """
+    ziel.mkdir(parents=True, exist_ok=True)
+    zaehler = {"dateien": 0, "saetze": 0}
+
+    gruppen: dict[tuple[str, str, str], list[tuple[str, str]]] = {}
+    for z in conn.execute("""
+        SELECT saison, datum_iso, kampfformat, quell_name, nutzlast
+        FROM Archiv_Champions ORDER BY saison, datum_iso, kampfformat, quell_name
+    """):
+        schluessel = (z["saison"], z["datum_iso"], z["kampfformat"])
+        gruppen.setdefault(schluessel, []).append((z["quell_name"], z["nutzlast"]))
+
+    for (saison, datum, kampfformat), saetze in gruppen.items():
+        ordner = ziel / saison / kampfformat
+        ordner.mkdir(parents=True, exist_ok=True)
+        datei = ordner / f"{datum}.ndjson.gz"
+
+        # mtime=0 haelt die Datei bytegleich, solange sich der Inhalt nicht
+        # aendert -- sonst erzeugte jeder Lauf einen Commit.
+        inhalt = "".join(
+            json.dumps({"quell_name": name, "zeilen": json.loads(nutzlast)},
+                       separators=(",", ":"), sort_keys=True) + "\n"
+            for name, nutzlast in sorted(saetze)
+        ).encode("utf-8")
+
+        neu = gzip.compress(inhalt, compresslevel=9, mtime=0)
+        if not datei.exists() or datei.read_bytes() != neu:
+            datei.write_bytes(neu)
+        zaehler["dateien"] += 1
+        zaehler["saetze"] += len(saetze)
+
+    return zaehler
+
+
+def importiere_archiv(conn: sqlite3.Connection, quelle: Path,
+                      lauf_id: int = 0) -> dict[str, int]:
+    """Liest zuvor exportierte Rohdaten zurueck in die Archivtabelle.
+
+    Damit startet ein frischer Lauf -- etwa auf einem leeren CI-Runner -- nicht
+    bei null, sondern mit der gesamten bereits gesicherten Historie. Erst das
+    macht die Archivierung ueber die Vorhaltezeit der Quelle hinaus wirksam.
+    """
+    zaehler = {"dateien": 0, "saetze": 0}
+    if not quelle.exists():
+        return zaehler
+
+    jetzt = datetime.now().isoformat(timespec="seconds")
+    for datei in sorted(quelle.glob("*/*/*.ndjson.gz")):
+        kampfformat = datei.parent.name
+        saison = datei.parent.parent.name
+        datum = datei.stem.removesuffix(".ndjson")
+
+        zeilen = []
+        with gzip.open(datei, "rt", encoding="utf-8") as strom:
+            for zeile in strom:
+                if not zeile.strip():
+                    continue
+                satz = json.loads(zeile)
+                zeilen.append((
+                    saison, datum, kampfformat, satz["quell_name"],
+                    json.dumps(satz["zeilen"], separators=(",", ":")), jetzt, lauf_id,
+                ))
+
+        conn.executemany(
+            """INSERT INTO Archiv_Champions
+                   (saison, datum_iso, kampfformat, quell_name, nutzlast,
+                    archiviert_am, lauf_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(saison, datum_iso, kampfformat, quell_name) DO NOTHING""",
+            zeilen,
+        )
+        zaehler["dateien"] += 1
+        zaehler["saetze"] += len(zeilen)
+
+    conn.commit()
+    return zaehler
+
+
 def lies_aus_archiv(conn: sqlite3.Connection, saison: str | None = None
                     ) -> list[Tagesabzug]:
     """Liest die Rohdaten aus dem Archiv zurueck.
@@ -602,13 +696,30 @@ def laden(conn: sqlite3.Connection, max_tage: int | None = None,
         # Die Attacken-Dimension traegt Typ, Kategorie und Basisschaden -- ohne
         # sie waere keine Matchup-Bewertung moeglich. Champions liefert nur den
         # Anzeigenamen, die Eigenschaften stammen aus der PokeAPI.
-        if not aus_archiv:
-            fortschritt(0.78, "Ergaenze fehlende Attacken-Stammdaten ...")
-            benoetigt = {
-                m["attacke_schluessel"] for s in saetze for m in s.merkmale
-                if m["attacke_schluessel"]
-            }
+        #
+        # Das gilt auch beim Neuaufbau aus dem Archiv: ``aus_archiv`` heisst
+        # "die Tagesstaende nicht erneut bei Champions abrufen", nicht "keine
+        # Stammdaten laden" -- die Pokemon-Stammdaten kommen dort ebenfalls
+        # ueber das Netz. Ein Ueberspringen liess ``Dim_Attacke`` auf einem
+        # frischen Rechner leer und damit jede Matchup-Bewertung ins Leere
+        # laufen. Nachgeladen wird ohnehin nur Fehlendes.
+        fortschritt(0.78, "Ergaenze fehlende Attacken-Stammdaten ...")
+        benoetigt = {
+            m["attacke_schluessel"] for s in saetze for m in s.merkmale
+            if m["attacke_schluessel"]
+        }
+        try:
             pipeline.attacken_ergaenzen(conn, benoetigt)
+        except Exception as fehler:  # noqa: BLE001 -- Netzfehler jeder Art
+            # Ohne Attacken bleiben die Nutzungsfakten gueltig; nur die
+            # Matchup-Bewertung ist eingeschraenkt. Das ist ein Qualitaets-
+            # befund, kein Grund, den ganzen Lauf zu verwerfen.
+            befunde.append(Befund(
+                "Dim_Attacke", "PokeAPI", "Verfuegbarkeit der Stammdatenquelle",
+                f"Attacken-Stammdaten konnten nicht nachgeladen werden: {fehler}. "
+                "Die Matchup-Bewertung bleibt bis zum naechsten Lauf unvollstaendig.",
+                klasse="Mangel 2. Klasse", dimension="Vollstaendigkeit",
+                verworfen=False))
 
         attacken_karte = {
             z["slug"]: z["attacke_sk"]

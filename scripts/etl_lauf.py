@@ -24,7 +24,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from bi import warehouse  # noqa: E402
+from bi.config import ARCHIV_VERZEICHNIS  # noqa: E402
 from bi.etl import champions, pipeline  # noqa: E402
+
+# Ein Ausfall des Quellsystems ist kein Codefehler. Der eigene Exit-Code
+# erlaubt es dem aufrufenden Workflow, beides zu unterscheiden: 1 bedeutet
+# "etwas stimmt am Programm nicht", 75 bedeutet "die Quelle war nicht erreichbar"
+# (in Anlehnung an EX_TEMPFAIL aus sysexits.h).
+EXIT_QUELLE = 75
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Champions-Daten allein aus dem Archiv neu verarbeiten")
     parser.add_argument("--max-tage", type=int,
                         help="Nur die juengsten N Tage der Quelle abrufen")
+    parser.add_argument("--archiv", type=Path, default=ARCHIV_VERZEICHNIS,
+                        help=f"Verzeichnis des Rohdatenarchivs (Standard: {ARCHIV_VERZEICHNIS})")
+    parser.add_argument("--ohne-archiv", action="store_true",
+                        help="Das Archiv auf der Platte nicht einlesen")
     parser.add_argument("--db", help="Abweichender Pfad zur Datenbankdatei")
     argumente = parser.parse_args(argv)
 
@@ -46,12 +57,21 @@ def main(argv: list[str] | None = None) -> int:
 
     conn = warehouse.verbindung(argumente.db)
 
+    # Zuerst das auf der Platte gesicherte Archiv einlesen. Auf einem frischen
+    # Runner ist die Datenbank leer; ohne diesen Schritt begaenne jeder Lauf bei
+    # null und die Zeitreihe koennte die Vorhaltezeit der Quelle nie ueberschreiten.
+    if not argumente.ohne_archiv:
+        eingelesen = champions.importiere_archiv(conn, argumente.archiv)
+        if eingelesen["saetze"]:
+            print(f"== Archiv eingelesen: {eingelesen['saetze']} Rohdatensaetze aus "
+                  f"{eingelesen['dateien']} Dateien ==", flush=True)
+
     if not argumente.nur_champions:
         print("== Schritt 1: Stammdaten (PokeAPI) ==", flush=True)
         ergebnis = pipeline.stammdaten_laden(conn, melde)
         if not ergebnis.erfolgreich:
             print(f"FEHLER: {ergebnis.meldung}", file=sys.stderr)
-            return 1
+            return EXIT_QUELLE
         h = ergebnis.historisierung
         print(f"   {ergebnis.geladen} Pokemon verarbeitet "
               f"(neu {h.get('neu', 0)}, geaendert {h.get('geaendert', 0)}, "
@@ -66,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
                             aus_archiv=argumente.aus_archiv, fortschritt=melde)
     if not champ.get("erfolgreich"):
         print(f"FEHLER: {champ.get('meldung')}", file=sys.stderr)
-        return 1
+        return EXIT_QUELLE
 
     print(f"   {champ['meldung']}")
     print(f"   {champ.get('neu_archiviert', 0)} Rohdatensaetze neu archiviert.")

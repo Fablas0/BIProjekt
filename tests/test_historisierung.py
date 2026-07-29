@@ -17,7 +17,7 @@ import json
 import pytest
 
 from bi import quality, warehouse
-from bi.etl import champions, load
+from bi.etl import champions, load, pipeline
 from bi.etl.transform import transformiere_pokemon, zeitdimension
 
 
@@ -203,6 +203,80 @@ def test_archivumfang(conn) -> None:
     assert umfang["erster_tag"] == "2026-07-26"
 
 
+def test_archiv_ueberlebt_als_datei_und_kehrt_zurueck(conn, tmp_path) -> None:
+    """Der Weg, auf dem die Zeitreihe die Vorhaltezeit der Quelle ueberdauert.
+
+    Ohne diesen Export-Import-Weg begaenne jeder Lauf auf einem frischen Runner
+    bei null, und das Archiv koennte nie mehr als die rund zwei Wochen umfassen,
+    die die Quelle selbst vorhaelt.
+    """
+    champions.archiviere(
+        conn, [_abzug(datum="2026-07-27"), _abzug(datum="2026-07-28"),
+               _abzug(datum="2026-07-28", kampfformat="Singles")], lauf_id=1)
+
+    export = champions.exportiere_archiv(conn, tmp_path / "archiv")
+    assert export["saetze"] == 3
+    assert export["dateien"] == 3
+
+    # Frische Datenbank -- so sieht es auf einem leeren Runner aus.
+    frisch = warehouse.verbindung(":memory:")
+    try:
+        assert warehouse.archiv_umfang(frisch).get("saetze") == 0
+
+        eingelesen = champions.importiere_archiv(frisch, tmp_path / "archiv")
+        assert eingelesen["saetze"] == 3
+
+        umfang = warehouse.archiv_umfang(frisch)
+        assert umfang["tage"] == 2
+        assert umfang["erster_tag"] == "2026-07-27"
+
+        # Die Nutzlast muss unveraendert zurueckkommen.
+        zurueck = champions.lies_aus_archiv(frisch)
+        assert {a.quell_name for a in zurueck} == {"Garchomp"}
+        assert zurueck[0].zeilen[0]["name"] == "Dragon Claw"
+    finally:
+        frisch.close()
+
+
+def test_export_ist_bytegleich_bei_unveraendertem_bestand(conn, tmp_path) -> None:
+    """Ein unveraenderter Tag darf keinen neuen Commit erzeugen.
+
+    Der Betriebslauf schreibt das Archiv taeglich ins Repository zurueck. Waeren
+    die Dateien nicht deterministisch, entstuende jeden Tag ein Commit ohne
+    inhaltliche Aenderung.
+    """
+    champions.archiviere(conn, [_abzug()], lauf_id=1)
+
+    champions.exportiere_archiv(conn, tmp_path / "archiv")
+    datei = next((tmp_path / "archiv").glob("*/*/*.ndjson.gz"))
+    erster = datei.read_bytes()
+
+    champions.exportiere_archiv(conn, tmp_path / "archiv")
+    assert datei.read_bytes() == erster, (
+        "Zweiter Export unterscheidet sich -- das erzeugte taeglich einen leeren Commit."
+    )
+
+
+def test_import_ist_idempotent(conn, tmp_path) -> None:
+    champions.archiviere(conn, [_abzug()], lauf_id=1)
+    champions.exportiere_archiv(conn, tmp_path / "archiv")
+
+    frisch = warehouse.verbindung(":memory:")
+    try:
+        champions.importiere_archiv(frisch, tmp_path / "archiv")
+        champions.importiere_archiv(frisch, tmp_path / "archiv")
+        assert frisch.execute(
+            "SELECT COUNT(*) FROM Archiv_Champions").fetchone()[0] == 1
+    finally:
+        frisch.close()
+
+
+def test_import_aus_leerem_verzeichnis_bleibt_stabil(conn, tmp_path) -> None:
+    """Der erste Lauf ueberhaupt findet noch kein Archiv vor."""
+    assert champions.importiere_archiv(conn, tmp_path / "gibtesnicht") == {
+        "dateien": 0, "saetze": 0}
+
+
 def test_archivluecke_wird_erkannt(conn) -> None:
     """Ein ausgelassener Ladelauf hinterlaesst eine nicht schliessbare Luecke."""
     champions.archiviere(
@@ -381,3 +455,48 @@ def test_zeitdimension_wird_mit_letztem_tag_markiert(conn) -> None:
     # Der Schluessel folgt dem Datum.
     assert conn.execute("SELECT zeit_sk FROM Dim_Zeit WHERE datum_iso='2026-07-28'"
                         ).fetchone()[0] == zeitdimension("2026-07-28")["zeit_sk"]
+
+
+def test_attacken_werden_auch_beim_archivneuaufbau_geladen(conn, monkeypatch) -> None:
+    """``--aus-archiv`` darf die Attacken-Stammdaten nicht ueberspringen.
+
+    Der Schalter bedeutet "die Tagesstaende nicht erneut bei Champions abrufen",
+    nicht "keine Stammdaten laden" -- die Pokemon-Stammdaten kommen im selben Lauf
+    ebenfalls ueber das Netz. Ein Ueberspringen liess ``Dim_Attacke`` auf einem
+    frischen Rechner leer; die Qualitaetsregel zur Attackenverknuepfung fiel dann
+    auf 0 Prozent und jede Matchup-Bewertung ins Leere.
+    """
+    load.lade_pokemon_dimension(conn, [_pokemon("garchomp")])
+    champions.archiviere(conn, [_abzug()], lauf_id=1)
+
+    gerufen: list[set[str]] = []
+    monkeypatch.setattr(pipeline, "attacken_ergaenzen",
+                        lambda _conn, namen, *a, **k: gerufen.append(namen) or 0)
+
+    ergebnis = champions.laden(conn, aus_archiv=True)
+
+    assert ergebnis["erfolgreich"], ergebnis.get("meldung")
+    assert gerufen, "attacken_ergaenzen wurde beim Archivneuaufbau nicht aufgerufen."
+    # Uebergeben wird die Kompaktform, mit der das PokeAPI-Verzeichnis indiziert
+    # ist -- ohne Bindestriche und Kleinschreibung.
+    assert "dragonclaw" in gerufen[0], (
+        f"Der benoetigte Attackenschluessel fehlt in {gerufen[0]}.")
+
+
+def test_ausfall_der_attackenquelle_verwirft_den_lauf_nicht(conn, monkeypatch) -> None:
+    """Ohne Attacken bleiben die Nutzungsfakten gueltig -- nur die Bewertung leidet."""
+    load.lade_pokemon_dimension(conn, [_pokemon("garchomp")])
+    champions.archiviere(conn, [_abzug()], lauf_id=1)
+
+    def _faellt_aus(*_a, **_k):
+        raise ConnectionError("PokeAPI nicht erreichbar")
+
+    monkeypatch.setattr(pipeline, "attacken_ergaenzen", _faellt_aus)
+
+    ergebnis = champions.laden(conn, aus_archiv=True)
+
+    assert ergebnis["erfolgreich"], "Ein Ausfall der Stammdatenquelle darf den Lauf nicht verwerfen."
+    assert conn.execute("SELECT COUNT(*) FROM Fact_Champions_Usage").fetchone()[0] > 0
+    befunde = [z[0] for z in conn.execute("SELECT meldung FROM DQ_Befund")]
+    assert any("nicht nachgeladen" in b for b in befunde), (
+        f"Der Ausfall wurde nicht protokolliert: {befunde}")
