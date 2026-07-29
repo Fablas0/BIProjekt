@@ -100,7 +100,7 @@ def _zeige_rangliste(conn, tag: str, kampfformat: str) -> None:
     )
     abbildung.update_traces(texttemplate="Rang %{text}")
     abbildung.update_layout(yaxis={"categoryorder": "total ascending"})
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     st.caption(
         "Das Rangperzentil normiert den Rang auf 0 bis 100 und macht Tage mit "
@@ -128,7 +128,7 @@ def _zeige_rangliste(conn, tag: str, kampfformat: str) -> None:
             "basiswert_summe": "Basiswertsumme",
         })[["Rang", "Pokemon", "Typen", "Rolle", "Rangperzentil",
             "Initiative (ohne Investition)", "Basiswertsumme"]],
-        use_container_width=True, hide_index=True, height=420,
+        width="stretch", hide_index=True, height=420,
     )
 
 
@@ -162,7 +162,7 @@ def _zeige_stabilitaet(conn, kampfformat: str) -> None:
         yaxis={"title": "Rangkorrelation", "range": [0.9, 1.005]},
         height=420, legend={"orientation": "h", "y": -0.2},
     )
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     letzte = verlauf.iloc[-1]
     wert = letzte["stabilitaet_zum_start"]
@@ -184,7 +184,7 @@ def _zeige_stabilitaet(conn, kampfformat: str) -> None:
             "datum_iso": "Tag", "stabilitaet_zum_start": "Korrelation zum Start",
             "stabilitaet_zum_vortag": "Korrelation zum Vortag",
             "top10_fluktuation": "Wechsel in den besten 10",
-        }), use_container_width=True, hide_index=True,
+        }), width="stretch", hide_index=True,
     )
 
 
@@ -221,7 +221,7 @@ def _zeige_bewegung(conn, tag: str, kampfformat: str) -> None:
             labels={"veraenderung": "Rangplaetze gutgemacht", "anzeigename": ""},
             text_auto="+d", height=340,
         )
-        st.plotly_chart(abbildung, use_container_width=True)
+        st.plotly_chart(abbildung, width="stretch")
 
     with rechts:
         st.markdown("#### Absteiger")
@@ -233,7 +233,7 @@ def _zeige_bewegung(conn, tag: str, kampfformat: str) -> None:
             labels={"veraenderung": "Rangplaetze verloren", "anzeigename": ""},
             text_auto="+d", height=340,
         )
-        st.plotly_chart(abbildung, use_container_width=True)
+        st.plotly_chart(abbildung, width="stretch")
 
     neu = bewegung[bewegung["richtung"] == "Neu erfasst"]
     if not neu.empty:
@@ -248,7 +248,7 @@ def _zeige_bewegung(conn, tag: str, kampfformat: str) -> None:
             "veraenderung": "Veraenderung", "richtung": "Tendenz",
             "typ_kombination": "Typen", "rolle": "Rolle",
         })[["Pokemon", "Rang", "Rang zuvor", "Veraenderung", "Tendenz", "Rolle"]],
-        use_container_width=True, hide_index=True, height=380,
+        width="stretch", hide_index=True, height=380,
     )
 
 
@@ -275,7 +275,7 @@ def _zeige_bestaendigkeit(conn, kampfformat: str) -> None:
                 "anzeigename": "", "bestaendigkeit": "Einstufung"},
         text_auto=".0f", height=560,
     )
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     st.dataframe(
         df.rename(columns={
@@ -285,7 +285,7 @@ def _zeige_bestaendigkeit(conn, kampfformat: str) -> None:
             "bestaendigkeit": "Einstufung",
         })[["Pokemon", "Tage in der Spitze", "Anteil (%)", "Bester Rang",
             "Schlechtester Rang", "Aktuell", "Einstufung"]],
-        use_container_width=True, hide_index=True, height=400,
+        width="stretch", hide_index=True, height=400,
     )
 
 
@@ -303,7 +303,7 @@ def _zeige_struktur(conn, tag: str, kampfformat: str) -> None:
             title="Primaertypen der besten 50",
         )
         abbildung.update_traces(textposition="inside", textinfo="percent+label")
-        st.plotly_chart(abbildung, use_container_width=True)
+        st.plotly_chart(abbildung, width="stretch")
 
     with rechts:
         rollen = df["rolle"].value_counts().reset_index()
@@ -316,7 +316,7 @@ def _zeige_struktur(conn, tag: str, kampfformat: str) -> None:
         )
         abbildung.update_layout(showlegend=False, coloraxis_showscale=False,
                                 yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(abbildung, use_container_width=True)
+        st.plotly_chart(abbildung, width="stretch")
 
     st.caption(
         "Die Teamrolle ist keine Angabe des Quellsystems, sondern wird im "

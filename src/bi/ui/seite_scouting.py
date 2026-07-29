@@ -75,7 +75,7 @@ def zeichne() -> None:
         st.dataframe(team.drop(columns=[s for s in ("usage_sk", "pokemon_sk", "zeit_sk",
                                                     "regulation_sk", "skill_sk")
                                         if s in team.columns]),
-                     use_container_width=True)
+                     width="stretch")
 
 
 # --------------------------------------------------------------------------
@@ -168,7 +168,7 @@ def _zeige_konfiguration(conn, team: pd.DataFrame, monat: str, kampfformat: str)
                     )
                     abbildung.update_layout(margin={"t": 10}, legend={"orientation": "h",
                                                                      "y": -0.25})
-                    st.plotly_chart(abbildung, use_container_width=True)
+                    st.plotly_chart(abbildung, width="stretch")
 
             with mitte:
                 st.markdown("**Items**")
@@ -244,7 +244,7 @@ def _zeige_schwaechen(conn, team: pd.DataFrame, monat: str, kampfformat: str) ->
         text_auto=".1f", height=420,
     )
     abbildung.update_layout(coloraxis_showscale=False)
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     st.dataframe(
         anzeige.rename(columns={
@@ -252,7 +252,7 @@ def _zeige_schwaechen(conn, team: pd.DataFrame, monat: str, kampfformat: str) ->
             "resistent": "Resistent", "immun": "Immun",
             "schlimmster_faktor": "Hoechster Faktor", "meta_anteil": "Meta-Anteil (%)",
             "risiko": "Risiko", "bewertung": "Bewertung",
-        }), use_container_width=True, hide_index=True, height=420,
+        }), width="stretch", hide_index=True, height=420,
     )
 
 
@@ -293,7 +293,7 @@ def _zeige_bedrohungen(conn, team: pd.DataFrame, monat: str, kampfformat: str) -
             "gefaehrdet": "Betroffen",
         })[["Pokemon", "Typen", "Rang im Meta", "Bedrohungswert", "Gefaehrlichste Attacke",
             "Gefaehrdete Mitglieder", "Betroffen"]],
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
 
     st.caption(

@@ -217,7 +217,7 @@ def _zeige_begruendung(beste: preview.Empfehlung, eigene: list[preview.Kaempfer]
         title="Wer traegt die Auswahl, wer belastet sie?",
     )
     abbildung.update_layout(coloraxis_showscale=False)
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     st.caption(
         "Der Beitrag ist der gemittelte Bewertungsanteil eines Pokemon ueber alle "
@@ -239,9 +239,9 @@ def _zeige_alle(empfehlungen: list[preview.Empfehlung]) -> None:
         title="Bewertung aller moeglichen Auswahlen",
     )
     abbildung.update_layout(coloraxis_showscale=False)
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
-    st.dataframe(tabelle, use_container_width=True, hide_index=True, height=420)
+    st.dataframe(tabelle, width="stretch", hide_index=True, height=420)
 
     st.caption(
         "Die Gesamtwertung verrechnet den Mittelwert ueber alle gegnerischen Auswahlen "
@@ -271,7 +271,7 @@ def _zeige_gegnerauswahlen(paarungen: list[preview.Paarung],
     )
     abbildung.update_layout(coloraxis_showscale=False,
                             yaxis={"categoryorder": "total descending"})
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     schlecht = matrix[matrix["Punktzahl"] < 0]
     if not schlecht.empty:
@@ -283,7 +283,7 @@ def _zeige_gegnerauswahlen(paarungen: list[preview.Paarung],
     else:
         st.success("Diese Auswahl ist gegen jede gegnerische Aufstellung im Vorteil.")
 
-    st.dataframe(matrix, use_container_width=True, hide_index=True, height=360)
+    st.dataframe(matrix, width="stretch", hide_index=True, height=360)
 
 
 def _zeige_einzelduelle(eigene: list[preview.Kaempfer],
@@ -300,7 +300,7 @@ def _zeige_einzelduelle(eigene: list[preview.Kaempfer],
         title="Einzelduelle: eigenes Pokemon gegen gegnerisches",
         height=max(360, 62 * len(matrix)),
     )
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     st.caption(
         "Gruen bedeutet Vorteil fuer dein Pokemon, rot Nachteil. Die Bewertung "
@@ -309,5 +309,5 @@ def _zeige_einzelduelle(eigene: list[preview.Kaempfer],
 
     st.dataframe(
         duelle.sort_values("Bewertung", ascending=False),
-        use_container_width=True, hide_index=True, height=360,
+        width="stretch", hide_index=True, height=360,
     )

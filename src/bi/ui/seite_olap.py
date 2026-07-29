@@ -150,17 +150,17 @@ def zeichne() -> None:
 
     navigation = st.columns([1, 1, 1, 3])
     with navigation[0]:
-        if st.button("Roll-Up", disabled=hinauf is None, use_container_width=True,
+        if st.button("Roll-Up", disabled=hinauf is None, width="stretch",
                      help="Zu einem staerker verdichteten Merkmal wechseln"):
             st.session_state["olap_zeile"] = hinauf
             st.rerun()
     with navigation[1]:
-        if st.button("Drill-Down", disabled=hinunter is None, use_container_width=True,
+        if st.button("Drill-Down", disabled=hinunter is None, width="stretch",
                      help="Zu einem detaillierteren Merkmal wechseln"):
             st.session_state["olap_zeile"] = hinunter
             st.rerun()
     with navigation[2]:
-        if st.button("Pivot", disabled=spalten_merkmal is None, use_container_width=True,
+        if st.button("Pivot", disabled=spalten_merkmal is None, width="stretch",
                      help="Zeilen- und Spaltenachse vertauschen (Rotation)"):
             st.session_state["olap_zeile"], st.session_state["olap_spalte"] = (
                 spalten_merkmal, zeilen_merkmal
@@ -202,11 +202,11 @@ def zeichne() -> None:
                   f"{olap.ALLE_MERKMALE[spalten_merkmal].bezeichnung}",
             height=max(420, 26 * len(tabelle)),
         )
-        st.plotly_chart(abbildung, use_container_width=True)
+        st.plotly_chart(abbildung, width="stretch")
         if begrenzt:
             st.caption("Dargestellt sind die 25 Auspraegungen mit der hoechsten Summe.")
 
-        st.dataframe(tabelle, use_container_width=True)
+        st.dataframe(tabelle, width="stretch")
 
     else:
         ergebnis = olap.kennzahl_mit_anteil(teilwuerfel, zeilen_merkmal, kennzahl_schluessel)
@@ -223,13 +223,13 @@ def zeichne() -> None:
             height=max(400, 24 * len(anzeige)),
         )
         abbildung.update_layout(coloraxis_showscale=False)
-        st.plotly_chart(abbildung, use_container_width=True)
+        st.plotly_chart(abbildung, width="stretch")
 
         st.dataframe(
             ergebnis.rename(columns={
                 zeilen_merkmal: aktuell.bezeichnung, "wert": kennzahl_beschriftung,
                 "anteil_prozent": "Anteil (%)", "kumuliert_prozent": "Kumuliert (%)",
-            }), use_container_width=True, hide_index=True, height=420,
+            }), width="stretch", hide_index=True, height=420,
         )
 
         achtzig = ergebnis[ergebnis["kumuliert_prozent"] <= 80]

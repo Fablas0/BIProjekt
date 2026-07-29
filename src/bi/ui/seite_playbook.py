@@ -135,7 +135,7 @@ def zeichne() -> None:
             color="anteil", color_continuous_scale="Sunset", text_auto=".1f", height=380,
         )
         abbildung.update_layout(coloraxis_showscale=False)
-        st.plotly_chart(abbildung, use_container_width=True)
+        st.plotly_chart(abbildung, width="stretch")
         st.caption(
             "Der Wert summiert die Meta-Praesenz aller Pokemon, die eine "
             "entsprechende Attacke oder Faehigkeit fuehren. Da die Quelle die Nutzung "

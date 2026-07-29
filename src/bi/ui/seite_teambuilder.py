@@ -147,7 +147,7 @@ def _zeige_partner(conn, team: pd.DataFrame, namen: list[str], monat: str,
             "bester_rang": "Bester Rang", "mittlerer_rang": "Mittlerer Rang",
             "passt_zu": "Passt zu",
         })[["Vorschlag", "Nennungen", "Bester Rang", "Mittlerer Rang", "Passt zu"]],
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
 
 
@@ -174,7 +174,7 @@ def _zeige_defensive(conn, team: pd.DataFrame, monat: str, kampfformat: str) -> 
         title="Schadensmultiplikatoren je Teammitglied",
         height=620,
     )
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     st.caption(
         "Gruen = resistent oder immun, rot = anfaellig. Ein Wert von 4 entsteht, wenn "
@@ -211,7 +211,7 @@ def _zeige_offensive(conn, namen: list[str], monat: str, kampfformat: str) -> No
         text_auto=".2f", height=560,
     )
     abbildung.update_layout(coloraxis_showscale=False)
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     luecken = anzeige[anzeige["beste_wirkung"] < 2]["verteidigungstyp"].tolist()
     if luecken:
@@ -257,9 +257,9 @@ def _zeige_initiative(conn, team: pd.DataFrame, monat: str, kampfformat: str) ->
             annotation_text=f"{zeile['Pokemon']} ({zeile['Initiative']})",
             annotation_position="top",
         )
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
-    st.dataframe(einordnung, use_container_width=True, hide_index=True)
+    st.dataframe(einordnung, width="stretch", hide_index=True)
 
     st.caption(
         "Die Initiative ist aus Basiswert, Wesen und Fleisspunkten des jeweils "

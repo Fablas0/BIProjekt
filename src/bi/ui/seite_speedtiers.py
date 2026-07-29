@@ -135,7 +135,7 @@ def _zeige_tierliste(tiers: pd.DataFrame, team: list[str]) -> None:
             "categoryarray": verteilung.sort_values("untergrenze")["band"].tolist(),
         },
     )
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     st.caption(
         "Die Begegnungshaeufigkeit verrechnet die Nutzung des Pokemon mit dem Anteil "
@@ -156,7 +156,7 @@ def _zeige_tierliste(tiers: pd.DataFrame, team: list[str]) -> None:
         anzeige[["Pokemon", "Grundwert", "Initiative", "Set",
                  "Anteil des Sets (%)", "Meta-Rang", "Begegnungshaeufigkeit",
                  "Eigenes Team"]],
-        use_container_width=True, hide_index=True, height=460,
+        width="stretch", hide_index=True, height=460,
     )
 
 
@@ -194,9 +194,9 @@ def _zeige_teamvergleich(conn, tiers: pd.DataFrame, team: list[str], monat: str,
         xaxis_title="Initiative (Stufe 50)", yaxis_title="Anzahl Sets",
         height=460, showlegend=False,
     )
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
-    st.dataframe(einordnung, use_container_width=True, hide_index=True)
+    st.dataframe(einordnung, width="stretch", hide_index=True)
 
     langsam = einordnung[einordnung["Ueberholt (%)"] < 30]
     if not langsam.empty and szenario == "normal":
@@ -229,12 +229,12 @@ def _zeige_szenarien(conn, team: list[str], monat: str, kampfformat: str) -> Non
         text_auto=".1f", height=420,
     )
     abbildung.update_layout(coloraxis_showscale=False)
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     st.dataframe(
         uebersicht[["Szenario", "Mittlere Initiative", "Ueberholt im Mittel (%)",
                     "Schnellstes Mitglied", "Erlaeuterung"]],
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
 
     ohne = uebersicht[uebersicht["schluessel"] == "normal"]
@@ -340,7 +340,7 @@ def _zeige_vorhersagbarkeit(conn, monat: str, kampfformat: str) -> None:
         title="Wie einheitlich werden die Meta-Pokemon gespielt?",
         text_auto=".0f", height=560,
     )
-    st.plotly_chart(abbildung, use_container_width=True)
+    st.plotly_chart(abbildung, width="stretch")
 
     unsicher = df[df["einstufung"] == "Gering"]
     if not unsicher.empty:
@@ -379,5 +379,5 @@ def _zeige_vorhersagbarkeit(conn, monat: str, kampfformat: str) -> None:
         })[["Pokemon", "Meta-Rang", "Haeufigstes Set", "Initiative",
             "Anteil des Top-Sets (%)", "Konzentration", "Erfasste Sets",
             "Vorhersagbarkeit"]],
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )

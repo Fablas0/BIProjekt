@@ -69,7 +69,7 @@ def _zeige_steuerung(conn) -> None:
             "bi-temporal historisiert."
         )
 
-        if st.button("Stammdaten laden", type="primary", use_container_width=True):
+        if st.button("Stammdaten laden", type="primary", width="stretch"):
             balken = st.progress(0.0, text="Starte ...")
             ergebnis = pipeline.stammdaten_laden(
                 conn, lambda a, t: balken.progress(min(a, 1.0), text=t))
@@ -101,7 +101,7 @@ def _zeige_steuerung(conn) -> None:
                  "Nuetzlich, wenn sich Ableitungsregeln geaendert haben.",
         )
 
-        if st.button("Champions-Daten laden", type="primary", use_container_width=True):
+        if st.button("Champions-Daten laden", type="primary", width="stretch"):
             balken = st.progress(0.0, text="Starte ...")
             ergebnis = champions.laden(
                 conn, aus_archiv=aus_archiv,
@@ -196,7 +196,7 @@ def _zeige_archiv(conn) -> None:
         GROUP BY datum_iso, saison, kampfformat
         ORDER BY datum_iso DESC, kampfformat
     """, conn)
-    st.dataframe(bestand, use_container_width=True, hide_index=True, height=340)
+    st.dataframe(bestand, width="stretch", hide_index=True, height=340)
 
     st.markdown("#### Saisons")
     st.caption(
@@ -212,7 +212,7 @@ def _zeige_archiv(conn) -> None:
         FROM Dim_Saison s JOIN Dim_Quelle q ON q.quelle_sk = s.quelle_sk
         ORDER BY s.ist_aktuell DESC, s.beginn DESC
     """, conn)
-    st.dataframe(saisons, use_container_width=True, hide_index=True)
+    st.dataframe(saisons, width="stretch", hide_index=True)
 
 
 def _zeige_qualitaet(conn) -> None:
@@ -278,7 +278,7 @@ def _zeige_qualitaet(conn) -> None:
             "korrigierbar, **Mangel 2. Klasse** ist erkennbar, erfordert aber eine "
             "fachliche Entscheidung."
         )
-        st.dataframe(protokoll, use_container_width=True, hide_index=True, height=340)
+        st.dataframe(protokoll, width="stretch", hide_index=True, height=340)
 
 
 def _zeige_protokoll(conn) -> None:
@@ -301,7 +301,7 @@ def _zeige_protokoll(conn) -> None:
         "gelesenen, geladenen und abgewiesenen Zeilen macht Datenverluste im Prozess "
         "unmittelbar sichtbar."
     )
-    st.dataframe(laeufe, use_container_width=True, hide_index=True)
+    st.dataframe(laeufe, width="stretch", hide_index=True)
 
     erfolgreich = laeufe[laeufe["Status"] == "erfolgreich"]
     if not erfolgreich.empty:
@@ -329,7 +329,7 @@ def _zeige_schichten(conn) -> None:
             continue
         with st.expander(f"{schicht} · {int(teil['Zeilen'].sum()):,} Zeilen".replace(",", "."),
                          expanded=schicht == "Fakt"):
-            st.dataframe(teil[["Tabelle", "Zeilen"]], use_container_width=True,
+            st.dataframe(teil[["Tabelle", "Zeilen"]], width="stretch",
                          hide_index=True)
 
     st.markdown("#### Nachweis der Historisierung")
@@ -345,7 +345,7 @@ def _zeige_schichten(conn) -> None:
                MIN(gueltig_ab) AS "Fruehester Beginn", MAX(gueltig_ab) AS "Letzter Beginn"
         FROM Dim_Pokemon GROUP BY ist_aktuell
     """, conn)
-    st.dataframe(historie, use_container_width=True, hide_index=True)
+    st.dataframe(historie, width="stretch", hide_index=True)
 
     geaendert = pd.read_sql("""
         SELECT slug AS "Bezeichner", anzeigename AS "Pokemon", gueltig_ab AS "Gueltig ab",
@@ -363,4 +363,4 @@ def _zeige_schichten(conn) -> None:
             "aendert, erscheint hier die vollstaendige Aenderungshistorie."
         )
     else:
-        st.dataframe(geaendert, use_container_width=True, hide_index=True)
+        st.dataframe(geaendert, width="stretch", hide_index=True)
