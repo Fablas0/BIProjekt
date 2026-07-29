@@ -60,10 +60,18 @@ HIERARCHIEN: dict[str, list[Merkmal]] = {
         Merkmal("monat_name", "Monat", "Zeit", 3),
         Merkmal("tag_label", "Tag", "Zeit", 4),
     ],
+    # Die Pokemon-Hierarchie hat bewusst nur zwei Stufen. Eine dritte Ebene fuer
+    # die Spezies waere fast ueberall deckungsgleich: von 208 Spezies haben nur
+    # 18 mehr als eine Form. Sie brachte damit einen zusaetzlichen Schritt im
+    # Konsolidierungspfad, der bei neun von zehn Pokemon nichts veraendert --
+    # und zeigte den technischen Bezeichner statt des lesbaren Namens.
+    #
+    # Gewaehlt ist die feinere Ebene, weil die Formen fachlich verschiedene
+    # Kaempfer sind: Wolwerock Tag und Wolwerock Zwielicht unterscheiden sich in
+    # Typ, Faehigkeit und Initiative.
     "Pokemon": [
         Merkmal("generation", "Generation", "Pokemon", 1),
-        Merkmal("spezies", "Spezies", "Pokemon", 2),
-        Merkmal("anzeigename", "Pokemon (Form)", "Pokemon", 3),
+        Merkmal("anzeigename", "Pokemon", "Pokemon", 2),
     ],
     "Typ": [
         Merkmal("typ1", "Primaertyp", "Typ", 1),
@@ -89,23 +97,54 @@ ALLE_MERKMALE: dict[str, Merkmal] = {
 class Kennzahl:
     """Eine verdichtbare Kennzahl samt zugehoeriger Aggregationsregel.
 
-    Die Aggregationsregel gehoert zwingend zur Kennzahl: der Nutzungsanteil ist
-    entlang der Pokemon-Dimension additiv, das Viability Ceiling dagegen nicht --
-    dort ist nur das Maximum sinnvoll, weil sich Spielstaerken nicht addieren.
+    Die Aggregationsregel gehoert zwingend zur Kennzahl: die Anzahl ist entlang
+    der Pokemon-Dimension additiv, ein Rang dagegen nicht -- dort ist nur ein
+    Extremwert oder der Median sinnvoll.
+
+    Zwei weitere Eigenschaften entscheiden ueber die Darstellung und sind
+    deshalb hier hinterlegt statt in der Oberflaeche verstreut:
+
+    ``kleiner_ist_besser``
+        Bei einem Rang ist 1 das beste Ergebnis. Wer "die besten zwanzig"
+        auswaehlt, meint die *kleinsten* Werte. Ohne diese Angabe waehlte eine
+        Bestenliste ausgerechnet die schwaechsten Auspraegungen aus.
+
+    ``anteil_zulaessig``
+        Ein Anteil setzt voraus, dass die Summe der Werte eine Bedeutung hat.
+        Fuer Zaehlgroessen trifft das zu, fuer Raenge nicht: die Summe aller
+        Raenge ist eine Zahl ohne fachlichen Gehalt, und ein daraus gebildeter
+        Prozentsatz taeuschte eine Verhaeltnisskala vor, die die Quelle nicht
+        liefert.
     """
 
     schluessel: str
     bezeichnung: str
     aggregation: str
     einheit: str = ""
+    kleiner_ist_besser: bool = False
+    anteil_zulaessig: bool = False
+
+    @property
+    def fehlwert(self) -> float | None:
+        """Womit eine leere Zelle der Kreuztabelle zu fuellen ist.
+
+        Bei einer Zaehlung bedeutet "nicht vorhanden" tatsaechlich null. Bei
+        einem Rang bedeutet es "an diesem Tag nicht platziert" -- eine Null
+        stuende dort faelschlich fuer ein Ergebnis besser als Rang 1.
+        """
+        return 0 if self.aggregation in ("nunique", "count", "sum") else None
 
 
 KENNZAHLEN: dict[str, Kennzahl] = {
     # Ordinale Kennzahlen: nur Extremwerte, Median und Anzahl sind zulaessig.
-    "rang_bester": Kennzahl("rang", "Bester Rang", "min", ""),
-    "rang_median": Kennzahl("rang", "Medianer Rang", "median", ""),
+    "rang_bester": Kennzahl("rang", "Bester Rang", "min", "",
+                            kleiner_ist_besser=True),
+    "rang_median": Kennzahl("rang", "Medianer Rang", "median", "",
+                            kleiner_ist_besser=True),
+    # Das Perzentil ist auf 0 bis 100 normiert, 100 steht fuer den ersten Platz.
     "rang_perzentil": Kennzahl("rang_perzentil", "Rangperzentil (Median)", "median", "%"),
-    "anzahl": Kennzahl("anzeigename", "Anzahl Pokemon", "nunique", ""),
+    "anzahl": Kennzahl("anzeigename", "Anzahl Pokemon", "nunique", "",
+                       anteil_zulaessig=True),
     # Kardinale Merkmale der Pokemon-Dimension -- hier sind Mittelwerte zulaessig.
     "basiswert_summe": Kennzahl("basiswert_summe", "Basiswertsumme (Mittelwert)", "mean", ""),
     "stufe50_speed": Kennzahl("stufe50_speed", "Initiative Stufe 50 (Mittelwert)", "mean", ""),
@@ -209,46 +248,96 @@ def verdichte(wuerfel: pd.DataFrame, zeilen_merkmal: str, kennzahl_schluessel: s
     Ohne ``spalten_merkmal`` entsteht eine eindimensionale Auswertung (**Merge**),
     mit ``spalten_merkmal`` eine Kreuztabelle (**Split**). Das Vertauschen der
     beiden Argumente entspricht der **Pivot**-Operation.
+
+    Leere Zellen bleiben leer, sofern die Kennzahl das verlangt: bei einem Rang
+    heisst "nicht vorhanden", dass das Pokemon an diesem Tag nicht platziert war.
+    Eine Null stuende dort fuer ein Ergebnis besser als Rang 1.
     """
     kennzahl = KENNZAHLEN[kennzahl_schluessel]
     if wuerfel.empty or zeilen_merkmal not in wuerfel.columns:
         return pd.DataFrame()
 
+    # Achse und Kennzahl koennen auf dieselbe Spalte zeigen: "Anzahl Pokemon"
+    # zaehlt ueber ``anzeigename`` und laesst sich zugleich nach ``anzeigename``
+    # aufreissen. pandas kann eine Spalte nicht gleichzeitig als Gruppierung und
+    # als Wert verwenden, deshalb bekommt der Wert hier eine eigene Kopie.
+    daten, werte_spalte = wuerfel, kennzahl.schluessel
+    if werte_spalte in (zeilen_merkmal, spalten_merkmal):
+        werte_spalte = "_kennzahl"
+        daten = wuerfel.assign(_kennzahl=wuerfel[kennzahl.schluessel])
+
     if spalten_merkmal and spalten_merkmal in wuerfel.columns:
         # observed=True: nach einem Slice sollen nur tatsaechlich vorhandene
         # Auspraegungen erscheinen, keine leeren Spalten der Kategorie.
+        zusatz = ({} if kennzahl.fehlwert is None
+                  else {"fill_value": kennzahl.fehlwert})
         tabelle = pd.pivot_table(
-            wuerfel, index=zeilen_merkmal, columns=spalten_merkmal,
-            values=kennzahl.schluessel, aggfunc=kennzahl.aggregation, fill_value=0,
-            observed=True,
+            daten, index=zeilen_merkmal, columns=spalten_merkmal,
+            values=werte_spalte, aggfunc=kennzahl.aggregation,
+            observed=True, **zusatz,
         )
         return tabelle.round(2)
 
-    reihe = (wuerfel.groupby(zeilen_merkmal, observed=True)[kennzahl.schluessel]
+    reihe = (daten.groupby(zeilen_merkmal, observed=True)[werte_spalte]
              .agg(kennzahl.aggregation))
     return reihe.round(2).reset_index(name=kennzahl.bezeichnung)
 
 
+def _guetereihenfolge(werte: pd.Series, kennzahl: Kennzahl) -> pd.Series:
+    """Sortiert eine Wertereihe von "am besten" nach "am schlechtesten"."""
+    return werte.sort_values(ascending=kennzahl.kleiner_ist_besser)
+
+
+def beste_auspraegungen(tabelle: pd.DataFrame, kennzahl_schluessel: str,
+                        anzahl: int | None = None) -> pd.DataFrame:
+    """Waehlt die fachlich staerksten Zeilen einer Kreuztabelle aus.
+
+    Bewertet wird ueber den besten Wert je Zeile, nicht ueber deren Summe. Eine
+    Summe ueber Raenge ist fachlich nicht belastbar, und sie benachteiligt genau
+    die Pokemon, die nur an einem Teil der Tage platziert waren.
+
+    ``anzahl=None`` liefert alle Zeilen, lediglich geordnet.
+    """
+    kennzahl = KENNZAHLEN[kennzahl_schluessel]
+    if tabelle.empty:
+        return tabelle
+
+    kern = tabelle.min(axis=1) if kennzahl.kleiner_ist_besser else tabelle.max(axis=1)
+    geordnet = tabelle.loc[_guetereihenfolge(kern, kennzahl).index]
+    return geordnet if anzahl is None else geordnet.head(anzahl)
+
+
 def kennzahl_mit_anteil(wuerfel: pd.DataFrame, merkmal: str,
                         kennzahl_schluessel: str = "anzahl") -> pd.DataFrame:
-    """Verdichtung samt relativem Anteil und kumuliertem Anteil.
+    """Verdichtung, geordnet von der besten zur schwaechsten Auspraegung.
 
-    Der kumulierte Anteil beantwortet Fragen der Form "wie viele Merkmalswerte
-    decken 80 Prozent des Metagames ab?" und macht die Konzentration unmittelbar
-    ablesbar.
+    Die Spalten ``anteil_prozent`` und ``kumuliert_prozent`` entstehen **nur**,
+    wenn die Kennzahl es zulaesst. Ein Anteil setzt voraus, dass die Summe der
+    Werte etwas bedeutet; bei Raengen ist das nicht der Fall. Zuvor errechnete
+    diese Funktion den Anteil unbesehen fuer jede Kennzahl -- ein Rang wurde
+    dabei durch die Summe aller Raenge geteilt, und die daraus abgeleitete
+    Aussage "N Auspraegungen decken 80 Prozent ab" war ohne Gehalt.
     """
     kennzahl = KENNZAHLEN[kennzahl_schluessel]
     if wuerfel.empty or merkmal not in wuerfel.columns:
         return pd.DataFrame()
 
-    df = (wuerfel.groupby(merkmal, observed=True)[kennzahl.schluessel]
-          .agg(kennzahl.aggregation).sort_values(ascending=False).reset_index())
-    df.columns = [merkmal, "wert"]
+    # ``rename`` vor ``reset_index``: Gruppierungsmerkmal und Kennzahl koennen
+    # dieselbe Spalte sein -- "Anzahl Pokemon" je Pokemon zaehlt ueber
+    # ``anzeigename`` und gruppiert zugleich danach. Ohne die Umbenennung
+    # scheitert das Zuruecksetzen des Index an zwei gleichnamigen Spalten.
+    daten = wuerfel.assign(_kennzahl=wuerfel[kennzahl.schluessel])
+    reihe = (daten.groupby(merkmal, observed=True)["_kennzahl"]
+             .agg(kennzahl.aggregation).rename("wert"))
+    df = _guetereihenfolge(reihe, kennzahl).rename_axis(merkmal).reset_index()
+    df["wert"] = df["wert"].round(2)
+
+    if not kennzahl.anteil_zulaessig:
+        return df
 
     gesamt = df["wert"].sum()
     df["anteil_prozent"] = (100 * df["wert"] / gesamt).round(1) if gesamt else 0.0
     df["kumuliert_prozent"] = df["anteil_prozent"].cumsum().round(1)
-    df["wert"] = df["wert"].round(2)
     return df
 
 

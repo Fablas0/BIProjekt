@@ -46,8 +46,10 @@ def zeichne() -> None:
     # Zustand der Achsen. Drill-Down und Roll-Up veraendern ihn, deshalb
     # muss er ueber die Neuausfuehrung der Seite hinweg erhalten bleiben.
     # ------------------------------------------------------------------
+    # Voreinstellung: Pokemon ueber die Tage. Das ist die Frage, mit der die
+    # meisten hierher kommen -- wer steigt, wer faellt.
     st.session_state.setdefault("olap_zeile", "anzeigename")
-    st.session_state.setdefault("olap_spalte", "monat_name")
+    st.session_state.setdefault("olap_spalte", "tag_label")
 
     # ------------------------------------------------------------------
     # Slice und Dice
@@ -181,6 +183,8 @@ def zeichne() -> None:
     # ------------------------------------------------------------------
     # Ergebnis
     # ------------------------------------------------------------------
+    kennzahl = olap.KENNZAHLEN[kennzahl_schluessel]
+
     if spalten_merkmal:
         tabelle = olap.verdichte(teilwuerfel, zeilen_merkmal, kennzahl_schluessel,
                                  spalten_merkmal)
@@ -188,54 +192,142 @@ def zeichne() -> None:
             st.warning("Die gewaehlte Kombination liefert keine Auswertung.")
             return
 
-        # Bei vielen Auspraegungen wird die Kreuztabelle unlesbar -- daher auf
-        # die 25 groessten Zeilen beschraenken und darauf hinweisen.
-        begrenzt = len(tabelle) > 25
-        if begrenzt:
-            tabelle = tabelle.loc[tabelle.sum(axis=1).nlargest(25).index]
+        _kreuztabelle(tabelle, kennzahl_schluessel, kennzahl_beschriftung,
+                      aktuell, olap.ALLE_MERKMALE[spalten_merkmal])
+        return
 
-        abbildung = px.imshow(
-            tabelle, text_auto=".1f", aspect="auto", color_continuous_scale="Sunset",
-            labels={"x": olap.ALLE_MERKMALE[spalten_merkmal].bezeichnung,
-                    "y": aktuell.bezeichnung, "color": kennzahl_beschriftung},
-            title=f"{kennzahl_beschriftung} nach {aktuell.bezeichnung} und "
-                  f"{olap.ALLE_MERKMALE[spalten_merkmal].bezeichnung}",
-            height=max(420, 26 * len(tabelle)),
+    ergebnis = olap.kennzahl_mit_anteil(teilwuerfel, zeilen_merkmal, kennzahl_schluessel)
+    if ergebnis.empty:
+        st.warning("Die gewaehlte Kombination liefert keine Auswertung.")
+        return
+
+    _rangliste(ergebnis, zeilen_merkmal, kennzahl, kennzahl_beschriftung, aktuell)
+
+
+def _zeilenzahl(gesamt: int, schluessel: str) -> int | None:
+    """Steuerung, wie viele Zeilen die Abbildung zeigt. ``None`` heisst: alle."""
+    stufen = [n for n in (10, 20, 30, 50, 100) if n < gesamt]
+    beschriftungen = [f"Top {n}" for n in stufen] + [f"Alle ({gesamt})"]
+    gewaehlt = st.selectbox(
+        "Umfang der Abbildung", beschriftungen,
+        index=min(1, len(beschriftungen) - 1), key=f"olap_umfang_{schluessel}",
+        help="Die Tabelle darunter enthaelt immer den vollstaendigen Bestand "
+             "und laesst sich durch Klick auf eine Spaltenueberschrift sortieren.",
+    )
+    return None if gewaehlt.startswith("Alle") else stufen[beschriftungen.index(gewaehlt)]
+
+
+def _kreuztabelle(tabelle, kennzahl_schluessel: str, kennzahl_beschriftung: str,
+                  zeilen_merkmal: olap.Merkmal, spalten_merkmal: olap.Merkmal) -> None:
+    """Zweiachsige Auswertung: Verlauf ueber die Zeit, sonst Kreuztabelle."""
+    kennzahl = olap.KENNZAHLEN[kennzahl_schluessel]
+
+    steuerung = st.columns([1, 3])
+    with steuerung[0]:
+        anzahl = _zeilenzahl(len(tabelle), "kreuz")
+
+    geordnet = olap.beste_auspraegungen(tabelle, kennzahl_schluessel)
+    auswahl = geordnet if anzahl is None else geordnet.head(anzahl)
+
+    # Auf einer Zeitachse ist der Verlauf die Frage, nicht der Einzelwert.
+    # Eine Linie je Auspraegung beantwortet sie unmittelbar; eine Heatmap
+    # zwingt dazu, Farbnuancen zu vergleichen.
+    if spalten_merkmal.dimension == "Zeit":
+        lang = (auswahl.T.reset_index()
+                .melt(id_vars=spalten_merkmal.schluessel,
+                      var_name=zeilen_merkmal.schluessel, value_name="wert")
+                .dropna(subset=["wert"]))
+        abbildung = px.line(
+            lang, x=spalten_merkmal.schluessel, y="wert",
+            color=zeilen_merkmal.schluessel, markers=True,
+            labels={spalten_merkmal.schluessel: spalten_merkmal.bezeichnung,
+                    "wert": kennzahl_beschriftung,
+                    zeilen_merkmal.schluessel: zeilen_merkmal.bezeichnung},
+            title=f"Verlauf: {kennzahl_beschriftung} je {zeilen_merkmal.bezeichnung} "
+                  f"ueber {spalten_merkmal.bezeichnung}",
+            height=max(460, 20 * min(len(auswahl), 30)),
         )
+        if kennzahl.kleiner_ist_besser:
+            # Rang 1 gehoert nach oben, sonst liest sich der Verlauf verkehrt.
+            abbildung.update_yaxes(autorange="reversed")
+        abbildung.update_layout(hovermode="x unified", legend_title_text="")
         st.plotly_chart(abbildung, width="stretch")
-        if begrenzt:
-            st.caption("Dargestellt sind die 25 Auspraegungen mit der hoechsten Summe.")
-
-        st.dataframe(tabelle, width="stretch")
-
+        st.caption(
+            "Eine Linie je Auspraegung. Ein unterbrochener Verlauf bedeutet, dass "
+            "das Pokemon an diesem Tag nicht platziert war -- diese Luecken werden "
+            "bewusst nicht mit einem Wert aufgefuellt."
+            + ("  Die Rangachse ist umgekehrt: oben ist besser."
+               if kennzahl.kleiner_ist_besser else "")
+        )
     else:
-        ergebnis = olap.kennzahl_mit_anteil(teilwuerfel, zeilen_merkmal, kennzahl_schluessel)
-        if ergebnis.empty:
-            st.warning("Die gewaehlte Kombination liefert keine Auswertung.")
-            return
-
-        anzeige = ergebnis.head(30)
-        abbildung = px.bar(
-            anzeige.sort_values("wert"), x="wert", y=zeilen_merkmal, orientation="h",
-            labels={"wert": kennzahl_beschriftung, zeilen_merkmal: ""},
-            title=f"{kennzahl_beschriftung} nach {aktuell.bezeichnung}",
-            color="wert", color_continuous_scale="Sunset", text_auto=".1f",
-            height=max(400, 24 * len(anzeige)),
+        abbildung = px.imshow(
+            auswahl, text_auto=".1f", aspect="auto", color_continuous_scale="Sunset",
+            labels={"x": spalten_merkmal.bezeichnung, "y": zeilen_merkmal.bezeichnung,
+                    "color": kennzahl_beschriftung},
+            title=f"{kennzahl_beschriftung} nach {zeilen_merkmal.bezeichnung} und "
+                  f"{spalten_merkmal.bezeichnung}",
+            height=max(420, 26 * len(auswahl)),
         )
-        abbildung.update_layout(coloraxis_showscale=False)
         st.plotly_chart(abbildung, width="stretch")
 
-        st.dataframe(
-            ergebnis.rename(columns={
-                zeilen_merkmal: aktuell.bezeichnung, "wert": kennzahl_beschriftung,
-                "anteil_prozent": "Anteil (%)", "kumuliert_prozent": "Kumuliert (%)",
-            }), width="stretch", hide_index=True, height=420,
+    if anzahl is not None:
+        gute_richtung = "niedrigsten" if kennzahl.kleiner_ist_besser else "hoechsten"
+        st.caption(
+            f"Abgebildet sind {len(auswahl)} von {len(tabelle)} Auspraegungen -- "
+            f"jene mit dem {gute_richtung} Wert der Kennzahl *{kennzahl_beschriftung}*. "
+            "Die Tabelle darunter zeigt den vollstaendigen Bestand."
         )
 
-        achtzig = ergebnis[ergebnis["kumuliert_prozent"] <= 80]
-        if not achtzig.empty and len(achtzig) < len(ergebnis):
-            st.info(
-                f"**Konzentration:** {len(achtzig)} von {len(ergebnis)} Auspraegungen "
-                f"des Merkmals *{aktuell.bezeichnung}* decken bereits 80 Prozent der "
-                f"Kennzahl *{kennzahl_beschriftung}* ab."
-            )
+    st.markdown(f"**Vollstaendige Auswertung** — {len(geordnet)} Auspraegungen, "
+                "sortierbar durch Klick auf eine Spaltenueberschrift")
+    st.dataframe(geordnet, width="stretch", height=420)
+
+
+def _rangliste(ergebnis, zeilen_schluessel: str, kennzahl: olap.Kennzahl,
+               kennzahl_beschriftung: str, merkmal: olap.Merkmal) -> None:
+    """Einachsige Auswertung (Merge)."""
+    steuerung = st.columns([1, 3])
+    with steuerung[0]:
+        anzahl = _zeilenzahl(len(ergebnis), "rang")
+
+    auswahl = ergebnis if anzahl is None else ergebnis.head(anzahl)
+
+    # ``ergebnis`` ist bereits von der besten zur schwaechsten Auspraegung
+    # geordnet. Plotly zeichnet die erste Kategorie unten, deshalb wird fuer die
+    # Abbildung umgedreht -- so steht das beste Ergebnis oben.
+    abbildung = px.bar(
+        auswahl.iloc[::-1], x="wert", y=zeilen_schluessel, orientation="h",
+        labels={"wert": kennzahl_beschriftung, zeilen_schluessel: ""},
+        title=f"{kennzahl_beschriftung} nach {merkmal.bezeichnung}"
+              + (" (kleiner ist besser)" if kennzahl.kleiner_ist_besser else ""),
+        color="wert", color_continuous_scale="Sunset", text_auto=".1f",
+        height=max(400, 24 * len(auswahl)),
+    )
+    abbildung.update_layout(coloraxis_showscale=False)
+    st.plotly_chart(abbildung, width="stretch")
+
+    if anzahl is not None:
+        st.caption(f"Abgebildet sind {len(auswahl)} von {len(ergebnis)} Auspraegungen.")
+
+    umbenannt = {zeilen_schluessel: merkmal.bezeichnung, "wert": kennzahl_beschriftung,
+                 "anteil_prozent": "Anteil (%)", "kumuliert_prozent": "Kumuliert (%)"}
+    st.markdown(f"**Vollstaendige Auswertung** — {len(ergebnis)} Auspraegungen, "
+                "sortierbar durch Klick auf eine Spaltenueberschrift")
+    st.dataframe(ergebnis.rename(columns=umbenannt), width="stretch",
+                 hide_index=True, height=420)
+
+    if not kennzahl.anteil_zulaessig:
+        st.caption(
+            f"Fuer *{kennzahl_beschriftung}* wird kein Anteil ausgewiesen. Ein "
+            "Prozentwert setzt voraus, dass die Summe der Werte etwas bedeutet -- "
+            "die Summe aller Raenge tut das nicht."
+        )
+        return
+
+    achtzig = ergebnis[ergebnis["kumuliert_prozent"] <= 80]
+    if not achtzig.empty and len(achtzig) < len(ergebnis):
+        st.info(
+            f"**Konzentration:** {len(achtzig)} von {len(ergebnis)} Auspraegungen "
+            f"des Merkmals *{merkmal.bezeichnung}* decken bereits 80 Prozent der "
+            f"Kennzahl *{kennzahl_beschriftung}* ab."
+        )

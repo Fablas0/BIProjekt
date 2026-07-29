@@ -8,6 +8,8 @@ Stammdaten der PokeAPI an, archiviert sie dauerhaft in einem historisierten Data
 Warehouse und stellt darauf ein Dashboard mit Kennzahlen, OLAP-Auswertung,
 Team-Analysen und einem Team-Preview-Advisor bereit.
 
+**Live: <https://biprojekt-9uepcwtgxhxxmgkyv8furo.streamlit.app>**
+
 Hochschulprojekt im Modul *Business Intelligence*, Duales Studium
 Wirtschaftsinformatik, WiSe 2025/26.
 
@@ -86,7 +88,7 @@ ohne etwas zu gewinnen.
 **Dimensionshierarchien** (Konsolidierungspfade für Drill-Down und Roll-Up):
 
 - Zeit: `Jahr → Quartal → Monat → Tag`
-- Pokémon: `Generation → Spezies → Form`
+- Pokémon: `Generation → Pokémon`
 - Typ: `Primärtyp → Typ-Kombination`
 - Rolle: `Offensivprofil → Teamrolle → Speed-Klasse`
 - Format: `Saison → Kampfformat`
@@ -115,8 +117,16 @@ Auf der **Merkmalsebene** — welche Attacke in wie viel Prozent der Sets vorkom
 liefert die Quelle dagegen echte Anteile. Dort ist der Herfindahl-Index zulässig
 und wird eingesetzt: als Maß für die Vorhersagbarkeit eines Sets.
 
-Ein Test sichert das strukturell ab: der Kennzahlenkatalog des OLAP-Explorers
-darf keine Summenaggregation über einen Rang anbieten.
+Zwei Tests sichern das strukturell ab: der Kennzahlenkatalog des OLAP-Explorers
+darf keine Summenaggregation über einen Rang anbieten, und ein Anteil in Prozent
+entsteht nur bei additiven Kennzahlen.
+
+Die zweite Regel ist teuer erkauft. Der Explorer wies den Anteil zuvor für jede
+Kennzahl aus — ein Rang wurde durch die Summe aller Ränge geteilt, und daraus
+entstand die Aussage „120 von 235 Ausprägungen decken 80 Prozent ab". Sie war
+ohne Gehalt, und sie widersprach genau dem Grundsatz, den dieser Abschnitt
+aufstellt. Jede Kennzahl trägt jetzt selbst, ob ein Anteil über ihr zulässig ist
+und ob ein kleinerer Wert der bessere ist.
 
 ---
 
