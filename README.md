@@ -186,9 +186,35 @@ Damit wächst eine Zeitreihe, die an der Quelle selbst nicht existiert. Das Arch
 erlaubt außerdem, geänderte Ableitungsregeln auf alle je gesicherten Tage
 anzuwenden, ohne die Quelle erneut anzufragen — 2 Sekunden statt 30.
 
-Zwei Qualitätsregeln sichern das ab: *Lückenlosigkeit des Archivs* meldet
-ausgelassene Ladeläufe, solange sich noch etwas retten lässt, und
-*Archivdeckung der Fakten* stellt sicher, dass jeder geladene Tag gesichert ist.
+### Zwei Stufen, weil eine nicht reicht
+
+Eine Tabelle allein genügt nicht: `data/` ist nicht versioniert, und ein
+CI-Läufer beginnt jedes Mal mit leerer Platte. Die Datenbanktabelle überlebt
+zwar jedes Zurücksetzen des Warehouse, aber keinen neuen Rechner. Deshalb wird
+das Archiv zusätzlich als Datei abgelegt und **mitversioniert**:
+
+```
+archiv/M4/Doubles/2026-07-28.ndjson.gz     ~0,3 MB je Tag
+```
+
+Eine Zeile je Rohdatensatz, gzip-komprimiert, deterministisch sortiert und ohne
+Zeitstempel im gzip-Kopf — ein unveränderter Tag erzeugt so eine byteweise
+identische Datei und damit keinen leeren Commit. Der ETL-Lauf liest dieses
+Verzeichnis vor jedem Zugriff auf die Quelle ein; der tägliche Workflow schreibt
+es danach zurück. Erst dieser Kreislauf lässt die Zeitreihe die 14-Tage-Grenze
+überschreiten.
+
+```bash
+python -m scripts.archiv_export        # Datenbank  → Dateien
+python -m scripts.etl_lauf             # Dateien    → Datenbank, dann Quelle
+python -m scripts.etl_lauf --ohne-archiv   # Dateiarchiv übergehen
+```
+
+Drei Qualitätsregeln sichern das ab: *Lückenlosigkeit des Archivs* meldet
+ausgelassene Ladeläufe, solange sich noch etwas retten lässt,
+*Archivdeckung der Fakten* stellt sicher, dass jeder geladene Tag gesichert ist,
+und der Export-Import-Weg selbst ist durch Tests abgedeckt — einschließlich der
+Byte-Gleichheit unveränderter Tage.
 
 ### Saisonabgrenzung
 
@@ -324,18 +350,31 @@ Warehouse vorliegt.
 
 **`ci.yml`** — bei jedem Push und Pull Request: Ruff-Linting, Tests auf Python
 3.10 und 3.12, und auf dem Hauptzweig zusätzlich ein Integrationslauf gegen die
-echte Quelle mit anschließendem Qualitätstor.
+echte Quelle mit anschließendem Qualitätstor. Der Lauf protokolliert die
+installierten Versionen; die meisten Befunde, die lokal nicht auftreten, sind
+Versionsunterschiede. Ist die Quelle nicht erreichbar (Rückgabewert 75), wird der
+Integrationsteil übersprungen statt rot gemeldet — ein fremder Ausfall ist kein
+Codefehler.
 
 **`etl_taeglich.yml`** — Operationalisierung: **täglich** um 05:00 Uhr. Der
 tägliche Rhythmus ist keine Kür, sondern Pflicht: die Quelle hält nur 14 Tage
-vor. Der Lauf stellt zuerst das Archiv des Vortages wieder her, lädt den neuen
-Tag, prüft die Qualität und sichert das Warehouse wieder als Artefakt.
+vor. Der Lauf liest das versionierte Dateiarchiv ein, holt den neuen Tag, schreibt
+das Archiv zurück ins Repository und prüft **erst danach** die Qualität — sonst
+könnte ein Qualitätsmangel einen unwiederbringlichen Tagesstand kosten. Hier
+führt ein Quellausfall bewusst zu einem roten Lauf: ein nicht abgeholter Tag ist
+nach der Vorhaltezeit endgültig verloren, das muss auffallen.
 
 ### Deployment
 
 Ausgelegt für **Streamlit Community Cloud**: Repository verbinden, `app.py` als
 Einstiegspunkt, `requirements.txt` wird automatisch installiert. Das Verzeichnis
-`data/` ist bewusst nicht versioniert.
+`data/` ist bewusst nicht versioniert, `archiv/` dagegen schon — die Cloud baut
+das Warehouse daraus auf.
+
+Die Abhängigkeiten sind exakt festgelegt und auf **Python 3.10 bis 3.14** geprüft:
+für jede dieser Versionen existiert von jedem Paket ein fertiges Wheel. Ohne diese
+Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dann
+45 Minuten statt einer.
 
 ---
 
