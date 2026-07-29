@@ -17,13 +17,14 @@ from .komponenten import (
     hole_verbindung,
     kennzahl_kachel,
     kopfauswahl,
+    seitenkopf,
 )
 
 
 def zeichne() -> None:
     conn = hole_verbindung()
 
-    st.title("Team-Builder")
+    seitenkopf("Team-Builder", "Wo ist mein Team angreifbar?")
     if not kpi.verfuegbare_formate(conn):
         hinweis_leere_datenbank()
         return

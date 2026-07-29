@@ -1,8 +1,11 @@
 [theme]
+# Farbwelt der Marke Pokemon, semantisch belegt -- siehe bi.ui.design.
+# Blau fuehrt die Bedienung, Gelb bleibt der Empfehlung vorbehalten und
+# taucht deshalb bewusst nicht als primaryColor auf.
 base = "dark"
-primaryColor = "#EF553B"
+primaryColor = "#6C7AE0"
 backgroundColor = "#0E1117"
-secondaryBackgroundColor = "#1A1D24"
+secondaryBackgroundColor = "#181B23"
 textColor = "#FAFAFA"
 
 [server]

@@ -20,13 +20,14 @@ from .komponenten import (
     hole_verbindung,
     kennzahl_kachel,
     kopfauswahl,
+    seitenkopf,
 )
 
 
 def zeichne() -> None:
     conn = hole_verbindung()
 
-    st.title("Speed-Tiers")
+    seitenkopf("Speed-Tiers", "Wer handelt zuerst?")
     if not kpi.verfuegbare_formate(conn):
         hinweis_leere_datenbank()
         return

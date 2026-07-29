@@ -76,7 +76,9 @@ def _starte(seite: str | None = None):
     app = AppTest.from_file(str(WURZEL / "app.py"), default_timeout=180)
     app.run()
     if seite and seite != SEITEN[0]:
-        app.radio[0].set_value(seite).run()
+        # Die Navigation besteht aus einem Schaltknopf je Seite; der Schluessel
+        # ist der Seitenname. Ein Auswahlfeld gibt es nicht mehr.
+        app.button(key=f"nav_{seite}").click().run()
     return app
 
 

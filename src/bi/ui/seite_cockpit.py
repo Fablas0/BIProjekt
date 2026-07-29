@@ -20,13 +20,14 @@ from .komponenten import (
     kennzahl_kachel,
     kopfauswahl,
     pokemon_karte,
+    seitenkopf,
 )
 
 
 def zeichne() -> None:
     conn = hole_verbindung()
 
-    st.title("Meta-Cockpit")
+    seitenkopf("Meta-Cockpit", "Wie sieht das Format aus, und wohin bewegt es sich?")
     if not kpi.verfuegbare_formate(conn):
         hinweis_leere_datenbank()
         return

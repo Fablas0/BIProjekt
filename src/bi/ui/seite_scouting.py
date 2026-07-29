@@ -18,6 +18,7 @@ from .komponenten import (
     hinweis_messniveau,
     hole_verbindung,
     kopfauswahl,
+    seitenkopf,
     typ_abzeichen_paar,
 )
 
@@ -25,7 +26,7 @@ from .komponenten import (
 def zeichne() -> None:
     conn = hole_verbindung()
 
-    st.title("Gegner-Scouting")
+    seitenkopf("Gegner-Scouting", "Womit ist bei diesem Gegner zu rechnen?")
     if not kpi.verfuegbare_formate(conn):
         hinweis_leere_datenbank()
         return

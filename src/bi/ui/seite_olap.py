@@ -13,7 +13,7 @@ import plotly.express as px
 import streamlit as st
 
 from ..analytics import olap
-from .komponenten import hinweis_leere_datenbank, hole_verbindung, kennzahl_kachel
+from .komponenten import hinweis_leere_datenbank, hole_verbindung, kennzahl_kachel, seitenkopf
 
 
 def _merkmal_optionen() -> dict[str, str]:
@@ -28,7 +28,7 @@ def zeichne() -> None:
     conn = hole_verbindung()
     wuerfel = olap.lade_wuerfel(conn)
 
-    st.title("OLAP-Explorer")
+    seitenkopf("OLAP-Explorer", "Den Datenwuerfel frei navigieren: Slice, Dice, Drill-Down, Pivot.")
     if wuerfel.empty:
         hinweis_leere_datenbank()
         return

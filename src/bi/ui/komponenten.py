@@ -134,16 +134,50 @@ def pokemon_karte(zeile: pd.Series, zusatz: str = "") -> str:
 
 
 def kennzahl_kachel(beschriftung: str, wert: str, hinweis: str = "",
-                    farbe: str = "#EF553B") -> str:
-    """Kachel fuer eine einzelne Kennzahl."""
+                    farbe: str | None = None) -> str:
+    """Kachel fuer eine einzelne Kennzahl.
+
+    Die Gestaltung liegt in :mod:`bi.ui.design`; hier entsteht nur die
+    Struktur. ``farbe`` uebersteuert die Akzentkante, wenn eine Kennzahl eine
+    eigene Bedeutung traegt -- etwa Rot fuer eine Bedrohung.
+    """
+    kante = f" style='border-left-color:{farbe};'" if farbe else ""
     return (
-        "<div style='padding:14px 16px;border-radius:12px;background:rgba(128,128,128,0.08);"
-        f"border-left:4px solid {farbe};height:100%;'>"
-        f"<div style='font-size:0.75rem;opacity:0.7;text-transform:uppercase;"
-        f"letter-spacing:0.04em;'>{beschriftung}</div>"
-        f"<div style='font-size:1.7rem;font-weight:700;line-height:1.25;'>{wert}</div>"
-        f"<div style='font-size:0.78rem;opacity:0.65;'>{hinweis}</div></div>"
+        f"<div class='kachel'{kante}>"
+        f"<div class='kachel-beschriftung'>{beschriftung}</div>"
+        f"<div class='kachel-wert'>{wert}</div>"
+        f"<div class='kachel-hinweis'>{hinweis}</div></div>"
     )
+
+
+def seitenkopf(titel: str, aufgabe: str, stand: str = "") -> None:
+    """Einheitlicher Seitenkopf mit Titel, Aufgabe und Datenstand.
+
+    Jede Seite beantwortet genau eine Frage. Sie im Kopf zu nennen erspart es,
+    die Aufgabe aus den Steuerelementen zu erschliessen -- und macht im
+    Team-Preview den Unterschied, wo rund 60 Sekunden bleiben.
+    """
+    st.markdown(
+        f"<div class='seitenkopf'><h1>{titel}</h1>"
+        f"<div class='aufgabe'>{aufgabe}</div>"
+        + (f"<div class='stand'>{stand}</div>" if stand else "")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def datenstand(conn, kampfformat: str | None = None, tag: str | None = None) -> str:
+    """Einzeiler ueber die Datengrundlage, fuer den Seitenkopf."""
+    basis = kpi.datenbasis(conn)
+    if not basis:
+        return ""
+    teile = [f"Pokemon Champions · Saison {basis.get('saison', '-')}",
+             f"{basis.get('tage', 0)} Tage bis {basis.get('ende', '-')}"]
+    if kampfformat:
+        teile.append(kampfformat)
+    if tag:
+        teile.append(f"Berichtstag {tag}")
+    return " · ".join(teile)
 
 
 AMPEL_FARBEN = {"gruen": "#2ecc71", "gelb": "#f1c40f", "rot": "#e74c3c"}

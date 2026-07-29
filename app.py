@@ -25,6 +25,7 @@ from bi import warehouse  # noqa: E402
 from bi.analytics import kpi  # noqa: E402
 from bi.config import QUELLE_VORHALTUNG_TAGE  # noqa: E402
 from bi.ui import (  # noqa: E402
+    design,
     komponenten,
     seite_cockpit,
     seite_etl,
@@ -47,6 +48,49 @@ SEITEN = {
     "ETL & Datenqualitaet": seite_etl.zeichne,
 }
 
+# Acht gleichrangige Eintraege sind eine Liste, keine Gliederung. Die Gruppierung
+# nach Arbeitsschritt macht die Reihenfolge lesbar: erst das Format verstehen,
+# dann das Team vorbereiten, dann vertiefen -- der Betrieb steht abseits.
+NAVIGATION: dict[str, list[tuple[str, str]]] = {
+    "Ueberblick": [
+        ("Meta-Cockpit", "Rangliste, Stabilitaet und Bewegung im Format"),
+    ],
+    "Vor dem Kampf": [
+        ("Team-Preview-Advisor", "Welche vier von sechs nehme ich mit?"),
+        ("Gegner-Scouting", "Womit ist bei diesem Gegner zu rechnen?"),
+        ("Team-Builder", "Wo ist mein Team angreifbar?"),
+        ("Speed-Tiers", "Wer handelt zuerst?"),
+    ],
+    "Vertiefung": [
+        ("OLAP-Explorer", "Wuerfel frei navigieren: Slice, Dice, Drill-Down"),
+        ("Meta-Playbook", "Verdichtete Handlungsempfehlungen"),
+    ],
+    "Betrieb": [
+        ("ETL & Datenqualitaet", "Ladelaeufe, Archiv und Qualitaetsbericht"),
+    ],
+}
+
+
+def _navigation() -> str:
+    """Seitenauswahl als anklickbare Kaesten.
+
+    Ein Auswahlfeld verlangt zwei Handgriffe und verbirgt die uebrigen
+    Moeglichkeiten. Als Kaesten sind alle Seiten samt ihrer Aufgabe sichtbar,
+    und ein Klick genuegt.
+    """
+    st.session_state.setdefault("seite", next(iter(SEITEN)))
+
+    for gruppe, eintraege in NAVIGATION.items():
+        st.markdown(f"<div class='nav-gruppe'>{gruppe}</div>", unsafe_allow_html=True)
+        for name, aufgabe in eintraege:
+            aktiv = st.session_state["seite"] == name
+            if st.button(name, key=f"nav_{name}", help=aufgabe, width="stretch",
+                         type="primary" if aktiv else "secondary"):
+                st.session_state["seite"] = name
+                st.rerun()
+
+    return st.session_state["seite"]
+
 
 def main() -> None:
     st.set_page_config(
@@ -55,12 +99,14 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
+    design.einbinden()
+    design.plotly_grundstil()
 
     with st.sidebar:
         st.markdown("## VGC Business Intelligence")
         st.caption("Data Warehouse und Analytics fuer Pokemon Champions")
 
-        seite = st.radio("Navigation", list(SEITEN.keys()), label_visibility="collapsed")
+        seite = _navigation()
         st.markdown("---")
 
         _zeige_status()

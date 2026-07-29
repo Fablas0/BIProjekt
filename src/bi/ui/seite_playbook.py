@@ -13,7 +13,7 @@ import streamlit as st
 
 from ..analytics import kpi
 from ..etl.transform import faehigkeit_klasse
-from .komponenten import hinweis_leere_datenbank, hole_verbindung, kopfauswahl
+from .komponenten import hinweis_leere_datenbank, hole_verbindung, kopfauswahl, seitenkopf
 
 # Archetypen des Formats. Die Erkennung erfolgt datengestuetzt ueber die im ETL
 # angereicherte Taktik-Klasse der Attacken bzw. die Effektklasse der Faehigkeiten.
@@ -109,7 +109,7 @@ ARCHETYPEN = [
 def zeichne() -> None:
     conn = hole_verbindung()
 
-    st.title("Meta-Playbook")
+    seitenkopf("Meta-Playbook", "Was folgt daraus fuer die Vorbereitung?")
     if not kpi.verfuegbare_formate(conn):
         hinweis_leere_datenbank()
         return

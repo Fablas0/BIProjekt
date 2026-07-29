@@ -13,13 +13,13 @@ from .. import quality, warehouse
 from ..analytics import kpi
 from ..config import QUELLE_VORHALTUNG_TAGE
 from ..etl import champions, pipeline
-from .komponenten import ampel, hole_verbindung, kennzahl_kachel, zwischenspeicher_leeren
+from .komponenten import ampel, hole_verbindung, kennzahl_kachel, seitenkopf, zwischenspeicher_leeren
 
 
 def zeichne() -> None:
     conn = hole_verbindung()
 
-    st.title("ETL & Datenqualitaet")
+    seitenkopf("ETL & Datenqualitaet", "Woher kommen die Daten, und wie gut sind sie?")
     st.markdown(
         "Der Ladeprozess ist in zwei Teilprozesse getrennt. Die **Stammdaten** aus der "
         "PokeAPI liefern Typen, Basiswerte und Attackeneigenschaften und aendern sich "

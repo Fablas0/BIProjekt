@@ -13,9 +13,11 @@ import streamlit as st
 
 from ..analytics import preview
 from ..config import sprite_url
+from . import design
 from .komponenten import (
     hole_verbindung,
     kennzahl_kachel,
+    seitenkopf,
     typ_abzeichen_paar,
 )
 
@@ -23,7 +25,11 @@ from .komponenten import (
 def zeichne() -> None:
     conn = hole_verbindung()
 
-    st.title("Team-Preview-Advisor")
+    seitenkopf(
+        "Team-Preview-Advisor",
+        "Welche Pokemon nehme ich gegen dieses Team mit?",
+        "Im Turnier bleiben dafuer rund 60 Sekunden.",
+    )
 
     vorhanden = conn.execute("SELECT COUNT(*) FROM Fact_Champions_Usage").fetchone()[0]
     if vorhanden == 0:
@@ -151,45 +157,78 @@ def _zeige_meta_hilfe(conn, kampfformat: str) -> None:
             )
 
 
+def _kaempferkarte(k: preview.Kaempfer, beitrag: float | None, gewaehlt: bool) -> str:
+    """Karte eines Pokemon -- hervorgehoben oder gedaempft."""
+    if gewaehlt:
+        zusatz = (f"<div class='karten-wert'>{beitrag:+.2f}</div>"
+                  f"<div style='font-size:0.72rem;opacity:0.7;'>Beitrag</div>")
+    else:
+        zusatz = "<div style='font-size:0.8rem;opacity:0.8;'>bleibt draussen</div>"
+
+    stil = "empfehlung-karte" if gewaehlt else "verworfen-karte"
+    return (
+        f"<div class='{stil}'>"
+        f"<img src='{sprite_url(k.pokedex_id)}' width='104'>"
+        f"<div class='karten-name'>{k.name}</div>"
+        f"<div style='margin-bottom:6px;'>{typ_abzeichen_paar(k.typ1, k.typ2)}</div>"
+        f"<div style='font-size:0.78rem;opacity:0.75;'>Initiative {k.speed}</div>"
+        f"{zusatz}</div>"
+    )
+
+
 def _zeige_empfehlung(beste: preview.Empfehlung, eigene: list[preview.Kaempfer],
                       mitnahme: int, gegnerauswahlen: int) -> None:
-    """Hebt die empfohlene Auswahl hervor."""
+    """Stellt die Entscheidung dar: wer geht rein, wer bleibt draussen.
+
+    Gezeigt werden **alle sechs** Pokemon, nicht nur die empfohlenen. Im
+    Team-Preview bleiben rund 60 Sekunden; wer nur die Auswahl sieht, muss den
+    Rest im Kopf abgleichen. Die Aufteilung ist die eigentliche Entscheidung,
+    also wird sie auch so dargestellt.
+    """
     nach_name = {k.name: k for k in eigene}
+    draussen = [k.name for k in eigene if k.name not in beste.auswahl]
+
+    st.markdown(
+        f"<div style='font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;"
+        f"opacity:0.65;font-weight:600;margin-bottom:6px;'>"
+        f"Mitnehmen — {mitnahme} von {len(eigene)}</div>", unsafe_allow_html=True)
 
     spalten = st.columns(mitnahme)
     for spalte, name in zip(spalten, beste.auswahl, strict=True):
-        k = nach_name[name]
-        beitrag = beste.beitraege.get(name, 0.0)
-        farbe = "#2ecc71" if beitrag > 0 else "#e74c3c"
-        with spalte:
-            st.markdown(
-                f"<div style='text-align:center;padding:12px 6px;border-radius:12px;"
-                f"background:rgba(46,204,113,0.10);border:1px solid rgba(46,204,113,0.35);'>"
-                f"<img src='{sprite_url(k.pokedex_id)}' width='112'>"
-                f"<div style='font-weight:700;margin-top:2px;'>{k.name}</div>"
-                f"<div style='margin:5px 0;'>{typ_abzeichen_paar(k.typ1, k.typ2)}</div>"
-                f"<div style='font-size:0.8rem;'>Initiative {k.speed}</div>"
-                f"<div style='font-size:0.8rem;color:{farbe};font-weight:600;'>"
-                f"Beitrag {beitrag:+.2f}</div>"
-                f"</div>", unsafe_allow_html=True,
-            )
+        spalte.markdown(
+            _kaempferkarte(nach_name[name], beste.beitraege.get(name, 0.0), True),
+            unsafe_allow_html=True)
+
+    if draussen:
+        st.markdown(
+            "<div style='font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;"
+            "opacity:0.5;font-weight:600;margin:16px 0 6px;'>Zuruecklassen</div>",
+            unsafe_allow_html=True)
+        # Dieselbe Spaltenbreite wie oben, damit die Karten untereinander stehen
+        # und der Vergleich ohne Suchen gelingt.
+        rest = st.columns(mitnahme)
+        for spalte, name in zip(rest, draussen, strict=False):
+            spalte.markdown(_kaempferkarte(nach_name[name], None, False),
+                            unsafe_allow_html=True)
 
     st.markdown("")
     kacheln = st.columns(4)
     kacheln[0].markdown(kennzahl_kachel(
         "Gesamtwertung", f"{beste.gesamtwertung:+.2f}",
-        "Mittelwert und Risiko verrechnet", "#2ecc71"), unsafe_allow_html=True)
+        "Mittelwert und Risiko verrechnet", design.POKEMON_GELB), unsafe_allow_html=True)
     kacheln[1].markdown(kennzahl_kachel(
         "Im Vorteil gegen", f"{beste.gewinnquote:.0f} %",
         f"der {gegnerauswahlen} gegnerischen Auswahlen",
-        "#2ecc71" if beste.gewinnquote >= 60 else "#f1c40f"), unsafe_allow_html=True)
+        design.GRUEN if beste.gewinnquote >= 60 else design.POKEMON_GOLD),
+        unsafe_allow_html=True)
     kacheln[2].markdown(kennzahl_kachel(
         "Schlechtester Fall", f"{beste.schlechtester_fall:+.2f}",
         "gegen die unguenstigste Auswahl",
-        "#e74c3c" if beste.schlechtester_fall < 0 else "#2ecc71"), unsafe_allow_html=True)
+        design.POKEMON_ROT if beste.schlechtester_fall < 0 else design.GRUEN),
+        unsafe_allow_html=True)
     kacheln[3].markdown(kennzahl_kachel(
         "Bester Fall", f"{beste.bester_fall:+.2f}",
-        "gegen die guenstigste Auswahl", "#6390F0"), unsafe_allow_html=True)
+        "gegen die guenstigste Auswahl", design.BLAU_HELL), unsafe_allow_html=True)
 
     if beste.schlechtester_fall < 0:
         st.warning(
@@ -212,7 +251,7 @@ def _zeige_begruendung(beste: preview.Empfehlung, eigene: list[preview.Kaempfer]
 
     abbildung = px.bar(
         beitraege, x="Beitrag", y="Pokemon", orientation="h",
-        color="Beitrag", color_continuous_scale=["#c0392b", "#f5f5f5", "#2ecc71"],
+        color="Beitrag", color_continuous_scale=[design.POKEMON_ROT, "#8A8F98", design.GRUEN],
         color_continuous_midpoint=0, text_auto="+.2f", height=300,
         title="Wer traegt die Auswahl, wer belastet sie?",
     )
@@ -233,7 +272,7 @@ def _zeige_alle(empfehlungen: list[preview.Empfehlung]) -> None:
     abbildung = px.bar(
         tabelle.head(15).sort_values("Gesamtwertung"),
         x="Gesamtwertung", y="Auswahl", orientation="h",
-        color="Gesamtwertung", color_continuous_scale=["#c0392b", "#f5f5f5", "#2ecc71"],
+        color="Gesamtwertung", color_continuous_scale=[design.POKEMON_ROT, "#8A8F98", design.GRUEN],
         color_continuous_midpoint=0, text_auto="+.2f",
         height=max(380, 26 * min(len(tabelle), 15)),
         title="Bewertung aller moeglichen Auswahlen",
@@ -264,7 +303,7 @@ def _zeige_gegnerauswahlen(paarungen: list[preview.Paarung],
 
     abbildung = px.bar(
         matrix, x="Punktzahl", y="Gegnerische Auswahl", orientation="h",
-        color="Punktzahl", color_continuous_scale=["#c0392b", "#f5f5f5", "#2ecc71"],
+        color="Punktzahl", color_continuous_scale=[design.POKEMON_ROT, "#8A8F98", design.GRUEN],
         color_continuous_midpoint=0, text_auto="+.2f",
         height=max(380, 26 * len(matrix)),
         title="Bewertung gegen jede moegliche gegnerische Auswahl",
@@ -294,7 +333,7 @@ def _zeige_einzelduelle(eigene: list[preview.Kaempfer],
     matrix = duelle.pivot(index="Eigenes Pokemon", columns="Gegner", values="Bewertung")
     abbildung = px.imshow(
         matrix, text_auto=".2f", aspect="auto",
-        color_continuous_scale=["#c0392b", "#f5f5f5", "#2ecc71"],
+        color_continuous_scale=[design.POKEMON_ROT, "#8A8F98", design.GRUEN],
         color_continuous_midpoint=0,
         labels={"color": "Bewertung"},
         title="Einzelduelle: eigenes Pokemon gegen gegnerisches",
