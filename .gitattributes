@@ -1,0 +1,13 @@
+# Zeilenenden festlegen.
+#
+# Das Projekt wurde unter Windows bearbeitet, laeuft aber unter Linux (CI und
+# Streamlit Cloud). Ohne Festlegung entscheidet das jeweils benutzte Werkzeug,
+# und derselbe Inhalt erscheint je nach Editor als vollstaendig geaenderte
+# Datei -- ein Diff wird dann unlesbar. LF ist die Vorgabe, weil es der
+# Zielumgebung entspricht.
+* text=auto eol=lf
+
+# Das Rohdatenarchiv ist gzip-komprimiert und darf nicht angefasst werden.
+*.ndjson.gz binary
+*.db        binary
+*.pdf       binary
