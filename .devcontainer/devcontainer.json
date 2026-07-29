@@ -17,7 +17,11 @@
       ]
     }
   },
-  "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo apt upgrade -y && sudo xargs apt install -y <packages.txt; [ -f requirements.txt ] && pip3 install --user -r requirements.txt; pip3 install --user streamlit; echo '✅ Packages installed and Requirements met'",
+  // requirements-dev.txt bindet requirements.txt ueber "-r" mit ein und bringt
+  // zusaetzlich pytest und ruff. Ohne diese beiden koennte eine Sitzung im
+  // Container ihre eigene Arbeit nicht pruefen -- und genau das ist die
+  // Voraussetzung, unter der hier gearbeitet wird.
+  "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo apt upgrade -y && sudo xargs apt install -y <packages.txt; pip3 install --user -r requirements-dev.txt; echo 'Abhaengigkeiten installiert -- pruefen mit: ruff check . && pytest -q'",
   "postAttachCommand": {
     "server": "streamlit run app.py --server.enableCORS false --server.enableXsrfProtection false"
   },
