@@ -198,8 +198,12 @@ archiv/M4/Doubles/2026-07-28.ndjson.gz     ~0,3 MB je Tag
 ```
 
 Eine Zeile je Rohdatensatz, gzip-komprimiert, deterministisch sortiert und ohne
-Zeitstempel im gzip-Kopf — ein unveränderter Tag erzeugt so eine byteweise
-identische Datei und damit keinen leeren Commit. Der ETL-Lauf liest dieses
+Zeitstempel im gzip-Kopf. Ob eine Datei neu geschrieben wird, entscheidet ein
+Vergleich der **entpackten Nutzlast** — nicht der komprimierten Bytes: zlib
+liefert je nach Fassung und Betriebssystem unterschiedliche Kompressate für
+denselben Eingang. Ein Byte-Vergleich schrieb im Betrieb das gesamte Archiv neu,
+sobald der Lauf vom Entwicklungsrechner auf den Linux-Runner wanderte. Der
+ETL-Lauf liest dieses
 Verzeichnis vor jedem Zugriff auf die Quelle ein; der tägliche Workflow schreibt
 es danach zurück. Erst dieser Kreislauf lässt die Zeitreihe die 14-Tage-Grenze
 überschreiten.

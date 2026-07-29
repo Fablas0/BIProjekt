@@ -45,7 +45,9 @@ def main(argv: list[str] | None = None) -> int:
 
     zaehler = champions.exportiere_archiv(conn, argumente.ziel)
     print(f"{zaehler['saetze']} Rohdatensaetze in {zaehler['dateien']} Dateien "
-          f"unter {argumente.ziel} geschrieben.")
+          f"unter {argumente.ziel}.")
+    print(f"Davon neu geschrieben: {zaehler['geschrieben']} "
+          f"({zaehler['dateien'] - zaehler['geschrieben']} unveraendert).")
     print(f"Abgedeckter Zeitraum: {umfang['erster_tag']} bis {umfang['letzter_tag']} "
           f"({umfang['tage']} Tage).")
     return 0

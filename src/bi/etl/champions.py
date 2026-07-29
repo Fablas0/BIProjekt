@@ -394,6 +394,16 @@ def archiviere(conn: sqlite3.Connection, abzuege: list[Tagesabzug], lauf_id: int
     return conn.total_changes
 
 
+def _entpackte_nutzlast(datei: Path) -> bytes | None:
+    """Liest den Inhalt einer Archivdatei; ``None``, wenn sie unlesbar ist."""
+    try:
+        return gzip.decompress(datei.read_bytes())
+    except (OSError, EOFError, gzip.BadGzipFile):
+        # Eine abgebrochene Datei wird kommentarlos ueberschrieben -- die
+        # Datenbank ist die massgebliche Fassung.
+        return None
+
+
 def exportiere_archiv(conn: sqlite3.Connection, ziel: Path) -> dict[str, int]:
     """Schreibt das Rohdatenarchiv als versionierbare Dateien auf die Platte.
 
@@ -401,8 +411,8 @@ def exportiere_archiv(conn: sqlite3.Connection, ziel: Path) -> dict[str, int]:
     NDJSON-Datei. Diese Form ist bewusst gewaehlt:
 
     * **Zeilenweise** -- ein Satz je Zeile, damit Aenderungen lesbar bleiben.
-    * **Deterministisch sortiert** -- ein unveraenderter Tag erzeugt eine
-      bytegleiche Datei und damit keinen neuen Commit.
+    * **Deterministisch sortiert** -- ein unveraenderter Tag erzeugt dieselbe
+      Nutzlast und damit keinen neuen Commit.
     * **Komprimiert** -- gemessen rund 0,3 MB je Tag statt 6,5 MB roh; git
       komprimiert diese Tagesstaende von sich aus nicht nennenswert weiter.
 
@@ -410,7 +420,9 @@ def exportiere_archiv(conn: sqlite3.Connection, ziel: Path) -> dict[str, int]:
     jederzeit neu ableitbar, die Rohnutzlast dagegen nicht wiederbeschaffbar.
     """
     ziel.mkdir(parents=True, exist_ok=True)
-    zaehler = {"dateien": 0, "saetze": 0}
+    # ``dateien``/``saetze`` beschreiben den Umfang des Archivs, ``geschrieben``
+    # nur die tatsaechlich veraenderten Dateien.
+    zaehler = {"dateien": 0, "saetze": 0, "geschrieben": 0}
 
     gruppen: dict[tuple[str, str, str], list[tuple[str, str]]] = {}
     for z in conn.execute("""
@@ -425,19 +437,27 @@ def exportiere_archiv(conn: sqlite3.Connection, ziel: Path) -> dict[str, int]:
         ordner.mkdir(parents=True, exist_ok=True)
         datei = ordner / f"{datum}.ndjson.gz"
 
-        # mtime=0 haelt die Datei bytegleich, solange sich der Inhalt nicht
-        # aendert -- sonst erzeugte jeder Lauf einen Commit.
         inhalt = "".join(
             json.dumps({"quell_name": name, "zeilen": json.loads(nutzlast)},
                        separators=(",", ":"), sort_keys=True) + "\n"
             for name, nutzlast in sorted(saetze)
         ).encode("utf-8")
 
-        neu = gzip.compress(inhalt, compresslevel=9, mtime=0)
-        if not datei.exists() or datei.read_bytes() != neu:
-            datei.write_bytes(neu)
         zaehler["dateien"] += 1
         zaehler["saetze"] += len(saetze)
+
+        # Verglichen wird die **Nutzlast**, nicht das Kompressat: zlib liefert
+        # je nach Fassung und Betriebssystem unterschiedliche Bytes fuer
+        # denselben Eingang. Ein Byte-Vergleich schrieb deshalb im Betrieb alle
+        # Dateien neu, sobald der Lauf auf einen anderen Rechner wanderte --
+        # taeglich ein Commit ueber 4 MB ohne jede inhaltliche Aenderung.
+        if datei.exists() and _entpackte_nutzlast(datei) == inhalt:
+            continue
+
+        # mtime=0 haelt die Datei auch bei wiederholtem Lauf auf derselben
+        # Umgebung bytegleich; der Zeitstempel gehoert nicht zum Inhalt.
+        datei.write_bytes(gzip.compress(inhalt, compresslevel=9, mtime=0))
+        zaehler["geschrieben"] += 1
 
     return zaehler
 

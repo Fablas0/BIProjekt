@@ -12,6 +12,7 @@ Diese Tests decken die zentralen Zusagen des Datenmodells ab:
 
 from __future__ import annotations
 
+import gzip
 import json
 
 import pytest
@@ -238,23 +239,63 @@ def test_archiv_ueberlebt_als_datei_und_kehrt_zurueck(conn, tmp_path) -> None:
         frisch.close()
 
 
-def test_export_ist_bytegleich_bei_unveraendertem_bestand(conn, tmp_path) -> None:
+def test_unveraenderter_tag_wird_nicht_neu_geschrieben(conn, tmp_path) -> None:
     """Ein unveraenderter Tag darf keinen neuen Commit erzeugen.
 
-    Der Betriebslauf schreibt das Archiv taeglich ins Repository zurueck. Waeren
-    die Dateien nicht deterministisch, entstuende jeden Tag ein Commit ohne
-    inhaltliche Aenderung.
+    Der Betriebslauf schreibt das Archiv taeglich ins Repository zurueck. Ohne
+    diese Zusage entstuende jeden Tag ein Commit ueber das gesamte Archiv, ganz
+    ohne inhaltliche Aenderung.
     """
     champions.archiviere(conn, [_abzug()], lauf_id=1)
 
-    champions.exportiere_archiv(conn, tmp_path / "archiv")
+    erst = champions.exportiere_archiv(conn, tmp_path / "archiv")
+    assert erst["geschrieben"] == 1
+
     datei = next((tmp_path / "archiv").glob("*/*/*.ndjson.gz"))
     erster = datei.read_bytes()
 
+    zweit = champions.exportiere_archiv(conn, tmp_path / "archiv")
+    assert zweit["geschrieben"] == 0, "Der zweite Export hat unveraenderte Dateien angefasst."
+    assert zweit["dateien"] == 1, "Der Umfang des Archivs wird weiterhin vollstaendig gemeldet."
+    assert datei.read_bytes() == erster
+
+
+def test_fremde_kompression_erzwingt_kein_neuschreiben(conn, tmp_path) -> None:
+    """Verglichen wird die Nutzlast, nicht das Kompressat.
+
+    zlib liefert je nach Fassung und Betriebssystem unterschiedliche Bytes fuer
+    denselben Eingang. Ein Byte-Vergleich schrieb deshalb im Betrieb das gesamte
+    Archiv neu, sobald der Lauf vom Entwicklungsrechner auf den Runner wanderte.
+    """
+    champions.archiviere(conn, [_abzug()], lauf_id=1)
     champions.exportiere_archiv(conn, tmp_path / "archiv")
-    assert datei.read_bytes() == erster, (
-        "Zweiter Export unterscheidet sich -- das erzeugte taeglich einen leeren Commit."
-    )
+
+    datei = next((tmp_path / "archiv").glob("*/*/*.ndjson.gz"))
+    nutzlast = gzip.decompress(datei.read_bytes())
+
+    # Dieselbe Nutzlast, andere Kompressionsstufe -- wie sie eine andere
+    # zlib-Fassung erzeugen wuerde.
+    anders = gzip.compress(nutzlast, compresslevel=1, mtime=0)
+    assert anders != datei.read_bytes(), "Vorbedingung: die Bytes muessen sich unterscheiden."
+    datei.write_bytes(anders)
+
+    zaehler = champions.exportiere_archiv(conn, tmp_path / "archiv")
+    assert zaehler["geschrieben"] == 0, (
+        "Trotz gleicher Nutzlast wurde neu geschrieben -- das erzeugt bei jedem "
+        "Umgebungswechsel einen Commit ueber das gesamte Archiv.")
+    assert datei.read_bytes() == anders, "Die vorhandene Datei wurde unnoetig ersetzt."
+
+
+def test_beschaedigte_archivdatei_wird_ersetzt(conn, tmp_path) -> None:
+    champions.archiviere(conn, [_abzug()], lauf_id=1)
+    champions.exportiere_archiv(conn, tmp_path / "archiv")
+
+    datei = next((tmp_path / "archiv").glob("*/*/*.ndjson.gz"))
+    datei.write_bytes(b"kein gueltiges gzip")
+
+    assert champions.exportiere_archiv(conn, tmp_path / "archiv")["geschrieben"] == 1
+    assert champions.lies_aus_archiv(conn)  # Datenbank bleibt massgeblich
+    assert gzip.decompress(datei.read_bytes()).count(b"\n") == 1
 
 
 def test_import_ist_idempotent(conn, tmp_path) -> None:
