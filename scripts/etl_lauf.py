@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from bi import warehouse  # noqa: E402
 from bi.config import ARCHIV_VERZEICHNIS  # noqa: E402
-from bi.etl import champions, pipeline  # noqa: E402
+from bi.etl import champions, pipeline, stammarchiv  # noqa: E402
 
 # Ein Ausfall des Quellsystems ist kein Codefehler. Der eigene Exit-Code
 # erlaubt es dem aufrufenden Workflow, beides zu unterscheiden: 1 bedeutet
@@ -61,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     # Runner ist die Datenbank leer; ohne diesen Schritt begaenne jeder Lauf bei
     # null und die Zeitreihe koennte die Vorhaltezeit der Quelle nie ueberschreiten.
     if not argumente.ohne_archiv:
+        # Stammdaten zuerst: ohne sie laesst sich kein Champions-Name aufloesen.
+        stammarchiv.importiere_stammdaten(conn, argumente.archiv)
         eingelesen = champions.importiere_archiv(conn, argumente.archiv)
         if eingelesen["saetze"]:
             print(f"== Archiv eingelesen: {eingelesen['saetze']} Rohdatensaetze aus "

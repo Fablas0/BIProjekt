@@ -194,7 +194,9 @@ zwar jedes Zurücksetzen des Warehouse, aber keinen neuen Rechner. Deshalb wird
 das Archiv zusätzlich als Datei abgelegt und **mitversioniert**:
 
 ```
-archiv/M4/Doubles/2026-07-28.ndjson.gz     ~0,3 MB je Tag
+archiv/M4/Doubles/2026-07-28.ndjson.gz        ~0,3 MB je Tag
+archiv/stammdaten/Dim_Pokemon.ndjson.gz        0,11 MB, einmalig
+archiv/stammdaten/Dim_Attacke.ndjson.gz        0,01 MB, einmalig
 ```
 
 Eine Zeile je Rohdatensatz, gzip-komprimiert, deterministisch sortiert und ohne
@@ -202,17 +204,47 @@ Zeitstempel im gzip-Kopf. Ob eine Datei neu geschrieben wird, entscheidet ein
 Vergleich der **entpackten Nutzlast** — nicht der komprimierten Bytes: zlib
 liefert je nach Fassung und Betriebssystem unterschiedliche Kompressate für
 denselben Eingang. Ein Byte-Vergleich schrieb im Betrieb das gesamte Archiv neu,
-sobald der Lauf vom Entwicklungsrechner auf den Linux-Runner wanderte. Der
-ETL-Lauf liest dieses
-Verzeichnis vor jedem Zugriff auf die Quelle ein; der tägliche Workflow schreibt
-es danach zurück. Erst dieser Kreislauf lässt die Zeitreihe die 14-Tage-Grenze
-überschreiten.
+sobald der Lauf vom Entwicklungsrechner auf den Linux-Runner wanderte.
+
+Der Stammdatenauszug liegt daneben, weil Champions nur Namen und Ränge liefert:
+Typ, Basiswerte und Attackeneigenschaften stammen aus der PokeAPI. Er wird
+**tabellengetreu** gesichert, samt Gültigkeitszeiträumen — eine Neuladung über
+den regulären Weg würde die bi-temporale Historie von `Dim_Pokemon` verlieren.
+
+Der ETL-Lauf liest dieses Verzeichnis vor jedem Zugriff auf die Quelle ein; der
+tägliche Workflow schreibt es danach zurück. Erst dieser Kreislauf lässt die
+Zeitreihe die 14-Tage-Grenze überschreiten.
 
 ```bash
 python -m scripts.archiv_export        # Datenbank  → Dateien
 python -m scripts.etl_lauf             # Dateien    → Datenbank, dann Quelle
 python -m scripts.etl_lauf --ohne-archiv   # Dateiarchiv übergehen
 ```
+
+### Das Warehouse entsteht beim Start neu
+
+Die Anwendung baut das Data Warehouse beim ersten Aufruf aus dem Archiv auf.
+Der Grund steht in den Größenverhältnissen — gemessen an 6 gegenüber 13 Tagen:
+
+| Bestand | je Tag | je Jahr | wiederbeschaffbar? |
+|---|---|---|---|
+| Rohdatenarchiv | 0,3 MB | ~110 MB | **nein** — die Quelle vergisst nach 14 Tagen |
+| Data Warehouse | 6,0 MB | ~2,2 GB | ja — in Sekunden aus dem Archiv |
+
+Gesichert wird deshalb das Kleine und Unersetzliche, aufgebaut wird das Große
+und Ableitbare. Das ist zugleich die Kernidee der Staging-Schicht: die Rohdaten
+sind die Wahrheit, das Warehouse ist eine Ableitung.
+
+Praktisch löst das ein reales Betriebsproblem: `data/` ist nicht versioniert,
+und Streamlit Community Cloud setzt bei jedem Deployment einen frischen Behälter
+auf — auch beim täglichen Archiv-Commit. Ohne diesen Schritt stünde die
+Anwendung dort jeden Tag wieder ohne Daten da.
+
+Der Aufbau läuft in `bi.bootstrap`, hängt in `hole_verbindung()` und geschieht
+über `st.cache_resource` genau einmal je Behälter. Er kommt **ohne jeden
+Netzzugriff** aus — ein Test schaltet die Verbindung dafür ab. Gemessen dauert
+er 7 Sekunden für 13 Tage; für Mitte September sind rund 30 Sekunden zu
+erwarten, einmalig nach jedem Deployment.
 
 Drei Qualitätsregeln sichern das ab: *Lückenlosigkeit des Archivs* meldet
 ausgelassene Ladeläufe, solange sich noch etwas retten lässt,
@@ -373,7 +405,8 @@ nach der Vorhaltezeit endgültig verloren, das muss auffallen.
 Ausgelegt für **Streamlit Community Cloud**: Repository verbinden, `app.py` als
 Einstiegspunkt, `requirements.txt` wird automatisch installiert. Das Verzeichnis
 `data/` ist bewusst nicht versioniert, `archiv/` dagegen schon — die Cloud baut
-das Warehouse daraus auf.
+das Warehouse beim ersten Aufruf daraus auf. Es ist also nichts einzurichten:
+Repository verbinden, fertig.
 
 Die Abhängigkeiten sind exakt festgelegt und auf **Python 3.10 bis 3.14** geprüft:
 für jede dieser Versionen existiert von jedem Paket ein fertiges Wheel. Ohne diese
@@ -395,6 +428,8 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 │   ├── etl/
 │   │   ├── extract.py            PokeAPI-Stammdaten
 │   │   ├── champions.py          Champions-Strecke inkl. Archivierung
+│   │   ├── archivdatei.py        Determinismus-Zusage der Archivdateien
+│   │   ├── stammarchiv.py        Versionierter Auszug der Stammdaten
 │   │   ├── mapping.py            Harmonisierung der Bezeichner
 │   │   ├── transform.py          Filterung · Anreicherung · Zeitdimension
 │   │   ├── load.py               Historisierung, Dimensionen, Protokoll

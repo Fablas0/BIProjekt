@@ -13,15 +13,45 @@ import sqlite3
 import pandas as pd
 import streamlit as st
 
+from .. import bootstrap
 from ..analytics import kpi
 from ..config import STANDARD_KAMPFFORMAT, TYP_DEUTSCH, TYP_FARBEN, sprite_url
-from ..warehouse import verbindung
+from ..warehouse import ist_befuellt, verbindung
 
 
 @st.cache_resource
 def hole_verbindung() -> sqlite3.Connection:
-    """Eine gemeinsam genutzte DWH-Verbindung fuer die gesamte Sitzung."""
-    return verbindung()
+    """Eine gemeinsam genutzte DWH-Verbindung fuer die gesamte Sitzung.
+
+    Beim ersten Aufruf in einem Behaelter wird das Data Warehouse aus dem
+    mitversionierten Archiv aufgebaut. Das ist keine Bequemlichkeit, sondern
+    Voraussetzung fuer den Betrieb in der Cloud: das Datenverzeichnis ist nicht
+    versioniert, und Streamlit Community Cloud setzt bei jedem Deployment einen
+    frischen Behaelter auf. Ohne diesen Schritt stuende die Anwendung dort
+    taeglich wieder ohne Daten da.
+
+    Dank ``cache_resource`` geschieht das genau einmal je Behaelter.
+    """
+    conn = verbindung()
+    if ist_befuellt(conn) or not bootstrap.ist_aufbau_moeglich():
+        return conn
+
+    anzeige = st.empty()
+    with anzeige.container():
+        st.info("Das Data Warehouse wird aus dem Archiv aufgebaut. "
+                "Das geschieht einmalig und dauert einige Sekunden.")
+        balken = st.progress(0.0)
+        beschriftung = st.empty()
+
+        def melde(anteil: float, meldung: str) -> None:
+            balken.progress(min(1.0, max(0.0, anteil)))
+            beschriftung.caption(meldung)
+
+        bootstrap.sicherstellen(conn, fortschritt=melde)
+
+    # Die Meldung wieder abraeumen: sie gehoert zum Aufbau, nicht zur Anwendung.
+    anzeige.empty()
+    return conn
 
 
 @st.cache_data(ttl=300)

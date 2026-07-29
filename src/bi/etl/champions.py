@@ -44,6 +44,7 @@ import requests
 
 from ..config import CHAMPIONS_BASIS, HTTP_THREADS, HTTP_TIMEOUT, KAMPFFORMATE
 from ..stats import STATUSWERTE, WESEN, alle_statuswerte, pruefe_statuspunkte, verteilung_kurzform
+from . import archivdatei
 from .extract import sitzung
 from .mapping import loese_auf
 from .transform import Befund
@@ -394,16 +395,6 @@ def archiviere(conn: sqlite3.Connection, abzuege: list[Tagesabzug], lauf_id: int
     return conn.total_changes
 
 
-def _entpackte_nutzlast(datei: Path) -> bytes | None:
-    """Liest den Inhalt einer Archivdatei; ``None``, wenn sie unlesbar ist."""
-    try:
-        return gzip.decompress(datei.read_bytes())
-    except (OSError, EOFError, gzip.BadGzipFile):
-        # Eine abgebrochene Datei wird kommentarlos ueberschrieben -- die
-        # Datenbank ist die massgebliche Fassung.
-        return None
-
-
 def exportiere_archiv(conn: sqlite3.Connection, ziel: Path) -> dict[str, int]:
     """Schreibt das Rohdatenarchiv als versionierbare Dateien auf die Platte.
 
@@ -437,27 +428,17 @@ def exportiere_archiv(conn: sqlite3.Connection, ziel: Path) -> dict[str, int]:
         ordner.mkdir(parents=True, exist_ok=True)
         datei = ordner / f"{datum}.ndjson.gz"
 
-        inhalt = "".join(
-            json.dumps({"quell_name": name, "zeilen": json.loads(nutzlast)},
-                       separators=(",", ":"), sort_keys=True) + "\n"
+        inhalt = archivdatei.als_ndjson([
+            {"quell_name": name, "zeilen": json.loads(nutzlast)}
             for name, nutzlast in sorted(saetze)
-        ).encode("utf-8")
+        ])
 
         zaehler["dateien"] += 1
         zaehler["saetze"] += len(saetze)
-
-        # Verglichen wird die **Nutzlast**, nicht das Kompressat: zlib liefert
-        # je nach Fassung und Betriebssystem unterschiedliche Bytes fuer
-        # denselben Eingang. Ein Byte-Vergleich schrieb deshalb im Betrieb alle
-        # Dateien neu, sobald der Lauf auf einen anderen Rechner wanderte --
-        # taeglich ein Commit ueber 4 MB ohne jede inhaltliche Aenderung.
-        if datei.exists() and _entpackte_nutzlast(datei) == inhalt:
-            continue
-
-        # mtime=0 haelt die Datei auch bei wiederholtem Lauf auf derselben
-        # Umgebung bytegleich; der Zeitstempel gehoert nicht zum Inhalt.
-        datei.write_bytes(gzip.compress(inhalt, compresslevel=9, mtime=0))
-        zaehler["geschrieben"] += 1
+        # Geschrieben wird nur bei geaenderter Nutzlast, verglichen ueber den
+        # entpackten Inhalt -- zur Begruendung siehe :mod:`bi.etl.archivdatei`.
+        if archivdatei.schreibe_wenn_geaendert(datei, inhalt):
+            zaehler["geschrieben"] += 1
 
     return zaehler
 

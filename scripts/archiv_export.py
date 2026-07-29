@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from bi import warehouse  # noqa: E402
 from bi.config import ARCHIV_VERZEICHNIS  # noqa: E402
-from bi.etl import champions  # noqa: E402
+from bi.etl import champions, stammarchiv  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,6 +48,13 @@ def main(argv: list[str] | None = None) -> int:
           f"unter {argumente.ziel}.")
     print(f"Davon neu geschrieben: {zaehler['geschrieben']} "
           f"({zaehler['dateien'] - zaehler['geschrieben']} unveraendert).")
+
+    # Ohne die Stammdaten laesst sich aus den Rohdaten kein Warehouse aufbauen:
+    # Champions liefert nur Namen und Raenge, alles Weitere stammt aus der
+    # PokeAPI. Gzip-komprimiert sind es 0,12 MB.
+    stamm = stammarchiv.exportiere_stammdaten(conn, argumente.ziel)
+    print(f"Stammdaten: {stamm['saetze']} Saetze in {stamm['tabellen']} Tabellen, "
+          f"{stamm['geschrieben']} neu geschrieben.")
     print(f"Abgedeckter Zeitraum: {umfang['erster_tag']} bis {umfang['letzter_tag']} "
           f"({umfang['tage']} Tage).")
     return 0
