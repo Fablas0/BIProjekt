@@ -23,6 +23,15 @@ jobs:
       - name: Abhaengigkeiten installieren
         run: pip install -r requirements-dev.txt
 
+      # Die tatsaechlich verwendeten Versionen protokollieren. Ein Befund, der
+      # lokal nicht auftritt, ist fast immer ein Versionsunterschied -- ohne
+      # dieses Protokoll ist das aus dem Fehlerbericht nicht ablesbar.
+      - name: Versionen protokollieren
+        run: |
+          python --version
+          ruff --version
+          pip freeze
+
       - name: Ruff (Linting und Importsortierung)
         run: ruff check .
 
@@ -66,17 +75,38 @@ jobs:
       - name: Abhaengigkeiten installieren
         run: pip install -r requirements-dev.txt
 
+      # Der Lauf liest zuerst das mitversionierte Rohdatenarchiv ein und ergaenzt
+      # es um die juengsten Tage der Quelle. Ein Ausfall des Quellsystems (Exit 75)
+      # ist kein Codefehler und darf die Codepruefung nicht rot faerben -- die
+      # nachfolgenden Schritte entfallen dann, weil kein Warehouse vorliegt.
       - name: Data Warehouse aufbauen
-        run: python -m scripts.etl_lauf --max-tage 3
+        id: etl
+        run: |
+          set +e
+          python -m scripts.etl_lauf --max-tage 3
+          code=$?
+          set -e
+          if [ "$code" -eq 75 ]; then
+            echo "quelle=aus" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Quellsystem nicht erreichbar::Der Integrationslauf wurde uebersprungen."
+            exit 0
+          fi
+          echo "quelle=an" >> "$GITHUB_OUTPUT"
+          exit "$code"
 
       - name: Datenqualitaet pruefen
+        if: steps.etl.outputs.quelle == 'an'
         # Bricht ab, wenn der Qualitaetsindex unter den Schwellwert faellt.
         run: python -m scripts.qualitaet_pruefen --mindestindex 90
 
       - name: Oberflaechentests gegen das befuellte Warehouse
+        # Erst hier laufen sie wirklich: ohne Datenbank ueberspringen sie sich
+        # selbst, weshalb die Matrix-Jobs oben sie faktisch nicht pruefen.
+        if: steps.etl.outputs.quelle == 'an'
         run: pytest tests/test_oberflaeche.py -q --tb=short
 
       - name: Data Warehouse als Artefakt sichern
+        if: steps.etl.outputs.quelle == 'an'
         uses: actions/upload-artifact@v4
         with:
           name: vgc-dwh
