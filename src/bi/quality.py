@@ -18,6 +18,12 @@ from datetime import date, datetime, timedelta
 from .config import QUELLE_VORHALTUNG_TAGE
 from .stats import MAX_SP_JE_WERT, SP_BUDGET
 
+# Qualitaetstor: ab diesem Index gilt der Bestand als brauchbar. Der Wert stand
+# zuvor nur als Aufrufparameter in den beiden Workflows -- damit konnte die
+# Oberflaeche eine Kachel gruen faerben, waehrend der naechtliche Lauf an
+# derselben Zahl scheiterte.
+MINDESTINDEX = 90.0
+
 
 @dataclass
 class Pruefergebnis:
@@ -30,12 +36,18 @@ class Pruefergebnis:
     betroffen: int = 0
 
     @property
-    def ampel(self) -> str:
-        """Ampelfarbe fuer die Anzeige im Qualitaetsbericht."""
+    def stufe(self) -> str:
+        """Schweregrad fuer die Anzeige im Qualitaetsbericht.
+
+        Drei Stufen, aber nur zwei Aussagen: bestanden oder nicht. Die
+        Unterscheidung zwischen ``warnung`` und ``fehler`` ist die Schwere des
+        Verstosses, keine dritte Bewertung -- die Oberflaeche stellt sie
+        deshalb als zwei Staerken derselben Farbe dar und nicht als eigene.
+        """
         if self.bestanden:
-            return "gruen"
-        return "rot" if self.betroffen > 0 and self.dimension in (
-            "Konsistenz", "Eindeutigkeit") else "gelb"
+            return "bestanden"
+        return "fehler" if self.betroffen > 0 and self.dimension in (
+            "Konsistenz", "Eindeutigkeit") else "warnung"
 
 
 def _zaehle(conn: sqlite3.Connection, sql: str, *parameter) -> int:

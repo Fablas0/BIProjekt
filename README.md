@@ -388,7 +388,20 @@ pip install -r requirements-dev.txt && pytest -q && ruff check .
 ```
 
 Die Oberflächentests überspringen sich selbst, solange kein befülltes Data
-Warehouse vorliegt.
+Warehouse vorliegt. Für einen vollständigen Lauf genügt
+
+```bash
+python -m scripts.etl_lauf --aus-archiv --nur-champions
+```
+
+— das baut das Warehouse allein aus dem mitversionierten Archiv auf und kommt
+dabei ohne jeden Netzzugriff aus: `--nur-champions` überspringt die PokeAPI,
+deren Stammdaten aus `archiv/stammdaten/` kommen.
+
+Neben den fachlichen Tests prüft `tests/test_design.py` die Gestaltung: kein
+Seitenmodul darf einen eigenen Farbwert setzen, und keine gemeinsame Farbskala
+darf ins Gelbe laufen — diese Farbe ist der Empfehlung des Team-Preview-Advisors
+vorbehalten.
 
 ---
 
@@ -452,7 +465,7 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 │   │   └── preview.py            Team-Preview-Advisor
 │   └── ui/                       acht Seitenmodule + gemeinsame Bausteine
 ├── scripts/                      kopflose ETL- und Prüfläufe
-├── tests/                        178 Tests
+├── tests/                        243 Tests
 └── .github/workflows/            CI und täglicher Ladelauf
 ```
 

@@ -28,7 +28,18 @@ erscheint deshalb ausschliesslich dort, wo die Anwendung eine Empfehlung
 ausspricht -- und nirgends sonst.
 
 Die 18 Typenfarben bleiben davon unberuehrt: sie kennzeichnen Pokemon-Typen und
-sind dem Spieler vertraut.
+sind dem Spieler vertraut. Umgekehrt gilt aber auch: eine Typenfarbe darf nur
+einen Typ bedeuten. Die Kennzahlkacheln trugen zuvor der Reihe nach Wasser-,
+Elektro-, Pflanzen-, Feuer- und Gift-Blau bis -Violett, ohne dass die Zahl
+darunter etwas mit dem Typ zu tun hatte. Damit war beides entwertet: die Kachel
+sagte nichts, und die Typenfarbe sagte nicht mehr nur eines.
+
+Kein Farbwert im Seitenmodul
+----------------------------
+Ein Seitenmodul waehlt keine Farbe, sondern eine **Aussage** -- ``guenstig``,
+``gefahr``, ``empfehlung`` oder nichts davon. Welcher Farbwert daraus wird,
+entscheidet allein diese Datei. ``tests/test_design.py`` haelt das nach: kein
+Modul unter ``bi.ui`` darf ein eigenes Farbliteral enthalten.
 """
 
 from __future__ import annotations
@@ -50,6 +61,19 @@ POKEMON_GOLD = "#B3A125"
 BLAU_HELL = "#6C7AE0"
 GRUEN = "#2ECC71"
 
+# Neutraler Grauton fuer alles, was im Diagramm nur Hintergrund ist -- etwa die
+# Verteilung des Metagames, vor der eine eigene Auswahl eingeordnet wird.
+GRAU_FLAECHE = "#4A5568"
+GRAU_MITTE = "#8A8F98"
+
+# Schrift auf einer eingefaerbten Flaeche. Die 18 Typenfarben sind durchweg
+# kraeftig genug, dass Weiss darauf lesbar bleibt.
+SCHRIFT_AUF_FARBE = "#FFFFFF"
+
+# Ersatz, wenn zu einem Typ keine Farbe hinterlegt ist -- etwa nach einer neuen
+# Spielgeneration, bevor die Palette nachgezogen wurde.
+TYP_ERSATZFARBE = "#777777"
+
 # Reihenfolge der Diagrammfarben. Beginnt bewusst nicht mit Gelb: diese Farbe
 # ist der Empfehlung vorbehalten und darf in einem beliebigen Diagramm nicht
 # auftauchen, sonst verliert sie ihre Signalwirkung.
@@ -58,10 +82,81 @@ DIAGRAMM_FOLGE = [
     "#A98FF3", "#96D9D6", "#C22E28", "#B7B7CE", "#A33EA1",
 ]
 
-# Verlauf fuer Kennzahlen, bei denen ein kleiner Wert der bessere ist -- etwa
-# ein Rang. Von kraeftigem Blau (gut) nach blass (schwach).
+# --------------------------------------------------------------------------
+# Farbverlaeufe
+# --------------------------------------------------------------------------
+# Ein Verlauf traegt eine Richtung, und die Richtung muss zur Kennzahl passen.
+# ``bi.analytics.olap.Kennzahl`` fuehrt dafuer bereits ``kleiner_ist_besser``;
+# die Oberflaeche waehlt den Verlauf danach aus, statt ihn zu raten.
+
+# Kennzahlen, bei denen ein kleiner Wert der bessere ist -- etwa ein Rang.
+# Von kraeftigem Blau (gut) nach blass (schwach).
 VERLAUF_RANG = [[0.0, POKEMON_BLAU], [0.5, "#6390F0"], [1.0, "#C9D4F5"]]
-VERLAUF_NEUTRAL = [[0.0, "#1F2A6E"], [0.5, BLAU_HELL], [1.0, "#FFE27A"]]
+
+# Kennzahlen ohne eigene Wertung, bei denen mehr schlicht mehr ist -- Anzahl,
+# Praesenzindex, Begegnungshaeufigkeit. Endet in Tuerkis statt wie zuvor in
+# einem blassen Gelb: ein Verlauf, der ins Gelbe laeuft, nimmt der Empfehlung
+# ihre Signalwirkung.
+VERLAUF_NEUTRAL = [[0.0, "#1F2A6E"], [0.5, BLAU_HELL], [1.0, "#9FE8DC"]]
+
+# Abgeschwaechtes Rot fuer einen Befund, der auffallen soll, ohne als harter
+# Verstoss zu erscheinen.
+ROT_SCHWACH = "#E4645F"
+
+# Risiko und Bedrohung: je hoeher der Wert, desto kraeftiger das Rot.
+VERLAUF_GEFAHR = [[0.0, "#F6D9D9"], [0.5, ROT_SCHWACH], [1.0, POKEMON_ROT]]
+
+# Bilanzgroessen mit einem Nullpunkt: negativ ist Nachteil, positiv Vorteil.
+# Immer zusammen mit ``color_continuous_midpoint`` verwenden, sonst liegt die
+# neutrale Mitte nicht auf dem fachlichen Nullpunkt.
+VERLAUF_BILANZ = [POKEMON_ROT, GRAU_MITTE, GRUEN]
+
+# Dieselbe Skala umgekehrt, fuer Groessen, bei denen ein hoher Wert schlecht
+# ist -- etwa ein Schadensmultiplikator gegen das eigene Team.
+VERLAUF_ANFAELLIGKEIT = [GRUEN, GRAU_MITTE, POKEMON_ROT]
+
+# Vierstufige Guete-Abstufung fuer geordnete Einstufungen (Bestaendigkeit,
+# Vorhersagbarkeit). Fuehrt von Gruen ueber Neutral nach Rot -- ohne Gelb, das
+# in einer solchen Reihe als mittlere Stufe naheliegen wuerde.
+ABSTUFUNG_GUETE = [GRUEN, "#7FBF9B", GRAU_MITTE, POKEMON_ROT]
+
+
+# Stufen des Qualitaetsberichts. Eine Verkehrsampel haette hier ein gelbes
+# Mittelfeld -- doch "Warnung" und "Fehler" sind beide ein *nicht bestanden*
+# und unterscheiden sich nur in der Schwere. Zwei Staerken derselben Farbe
+# geben das richtig wieder, und Gelb bleibt der Empfehlung vorbehalten.
+STUFEN_FARBEN = {"bestanden": GRUEN, "warnung": ROT_SCHWACH, "fehler": POKEMON_ROT}
+
+
+def abstufung_farben(stufen: list[str]) -> dict[str, str]:
+    """Ordnet einer geordneten Einstufung ihre Farben zu.
+
+    ``stufen`` ist von der besten zur schwaechsten Auspraegung anzugeben. Damit
+    liegt die Reihenfolge dort, wo sie hingehoert -- an der fachlichen Skala des
+    Seitenmoduls --, die Farbwahl aber hier.
+    """
+    return {stufe: ABSTUFUNG_GUETE[min(i, len(ABSTUFUNG_GUETE) - 1)]
+            for i, stufe in enumerate(stufen)}
+
+
+# --------------------------------------------------------------------------
+# Bedeutungen einer Kennzahlkachel
+# --------------------------------------------------------------------------
+# Mehr als diese vier gibt es nicht. Eine fuenfte Stufe -- etwa ein "geht so"
+# zwischen guenstig und gefahr -- waere genau die Abstufung, die in 60 Sekunden
+# niemand mehr liest; und sie landete zwangslaeufig bei Gelb.
+#
+# Eine Kachel verlaesst ``neutral`` nur, wenn die Zahl ein Urteil traegt:
+# ``guenstig``   eine Anforderung ist erfuellt, es liegt kein Mangel vor
+# ``gefahr``     ein Mangel liegt vor oder eine Anforderung ist verfehlt
+# ``empfehlung`` diese Zahl *ist* die Empfehlung der Anwendung
+# ``neutral``    eine blosse Angabe ohne Wertung
+#
+# Gemeint ist eine echte Anforderung -- das Qualitaetstor, eine Typendeckung,
+# die Erreichbarkeit eines Benchmarks. Ein Wert, der lediglich hoeher sein
+# koennte, bleibt neutral; sonst leuchtet die halbe Seite rot und die Farbe
+# sagt wieder nichts.
+BEDEUTUNGEN = ("neutral", "guenstig", "gefahr", "empfehlung")
 
 
 def _stilblatt() -> str:
@@ -135,7 +230,12 @@ def _stilblatt() -> str:
     }}
 
     /* ---------------------------------------------------------------
-       Kennzahlkacheln
+       Kennzahlkacheln. Die linke Kante traegt die Aussage: ohne Zusatz
+       eine blosse Angabe, sonst guenstig, gefahr oder empfehlung.
+
+       Die Kachel der Empfehlung faerbt zusaetzlich ihre Flaeche ein. Sie
+       ist der einzige Ort neben den Empfehlungskarten, an dem Gelb
+       auftaucht -- eine gelbe Kante allein ginge im Ueberfliegen unter.
        --------------------------------------------------------------- */
     .kachel {{
         padding: var(--abstand-m) 16px;
@@ -143,6 +243,13 @@ def _stilblatt() -> str:
         background: var(--flaeche);
         border-left: 4px solid var(--akzent-hell);
         height: 100%;
+    }}
+    .kachel--guenstig {{ border-left-color: var(--guenstig); }}
+    .kachel--gefahr   {{ border-left-color: var(--gefahr); }}
+    .kachel--empfehlung {{
+        border-left-color: var(--empfehlung);
+        background: linear-gradient(90deg,
+            rgba(255, 203, 5, 0.15), var(--flaeche) 65%);
     }}
     .kachel-beschriftung {{
         font-size: 0.72rem;
@@ -157,6 +264,21 @@ def _stilblatt() -> str:
         font-variant-numeric: tabular-nums;
     }}
     .kachel-hinweis {{ font-size: 0.78rem; opacity: 0.65; }}
+
+    /* ---------------------------------------------------------------
+       Kompakte Karten in Uebersichten. Ohne Zusatz eine blosse
+       Auflistung; der Zusatz traegt dieselben Aussagen wie bei den
+       Kacheln und faerbt die Flaeche entsprechend ein.
+       --------------------------------------------------------------- */
+    .karte {{
+        text-align: center;
+        padding: 10px 6px;
+        border-radius: var(--radius);
+        background: var(--flaeche);
+        height: 100%;
+    }}
+    .karte--guenstig {{ background: rgba(46, 204, 113, 0.11); }}
+    .karte--gefahr   {{ background: rgba(238, 21, 21, 0.10); }}
 
     /* ---------------------------------------------------------------
        Seitenkopf: Titel, Aufgabe der Seite und Datenstand in einem Block

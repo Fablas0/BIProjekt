@@ -17,6 +17,7 @@ from .. import bootstrap
 from ..analytics import kpi
 from ..config import STANDARD_KAMPFFORMAT, TYP_DEUTSCH, TYP_FARBEN, sprite_url
 from ..warehouse import ist_befuellt, verbindung
+from . import design
 
 
 @st.cache_resource
@@ -105,10 +106,11 @@ def typ_abzeichen(typ: str | None) -> str:
     """HTML-Abzeichen fuer einen Pokemon-Typ in der zugehoerigen Farbe."""
     if not typ or pd.isna(typ):
         return ""
-    farbe = TYP_FARBEN.get(typ, "#777")
+    farbe = TYP_FARBEN.get(typ, design.TYP_ERSATZFARBE)
     beschriftung = TYP_DEUTSCH.get(typ, typ)
     return (
-        f"<span style='background:{farbe};color:#fff;padding:2px 9px;border-radius:10px;"
+        f"<span style='background:{farbe};color:{design.SCHRIFT_AUF_FARBE};"
+        f"padding:2px 9px;border-radius:10px;"
         f"font-size:0.72rem;font-weight:600;margin-right:4px;white-space:nowrap;'>"
         f"{beschriftung}</span>"
     )
@@ -122,8 +124,7 @@ def typ_abzeichen_paar(typ1: str | None, typ2: str | None = None) -> str:
 def pokemon_karte(zeile: pd.Series, zusatz: str = "") -> str:
     """Kompakte Kartendarstellung eines Pokemon fuer Uebersichten."""
     return (
-        "<div style='text-align:center;padding:10px 6px;border-radius:12px;"
-        "background:rgba(128,128,128,0.08);height:100%;'>"
+        "<div class='karte'>"
         f"<img src='{sprite_url(int(zeile['pokedex_id']))}' width='104' "
         "style='display:block;margin:0 auto;'>"
         f"<div style='font-weight:600;margin:4px 0 6px;font-size:0.95rem;'>"
@@ -134,20 +135,159 @@ def pokemon_karte(zeile: pd.Series, zusatz: str = "") -> str:
 
 
 def kennzahl_kachel(beschriftung: str, wert: str, hinweis: str = "",
-                    farbe: str | None = None) -> str:
+                    bedeutung: str = "neutral") -> str:
     """Kachel fuer eine einzelne Kennzahl.
 
-    Die Gestaltung liegt in :mod:`bi.ui.design`; hier entsteht nur die
-    Struktur. ``farbe`` uebersteuert die Akzentkante, wenn eine Kennzahl eine
-    eigene Bedeutung traegt -- etwa Rot fuer eine Bedrohung.
+    Angegeben wird keine Farbe, sondern die **Aussage** der Zahl -- eine der
+    vier aus :data:`bi.ui.design.BEDEUTUNGEN`. Welcher Farbwert daraus wird,
+    entscheidet allein das Designsystem.
+
+    Zuvor reichte jede Seite hier einen Hexwert herein und griff dafuer in die
+    Typenpalette: die Kacheln des Cockpits trugen Wasser-, Elektro-, Gift-,
+    Pflanzen- und Feuerfarbe, ohne dass eine davon etwas ueber ihre Zahl sagte.
     """
-    kante = f" style='border-left-color:{farbe};'" if farbe else ""
+    if bedeutung not in design.BEDEUTUNGEN:
+        raise ValueError(
+            f"Unbekannte Bedeutung '{bedeutung}'. Zulaessig: {', '.join(design.BEDEUTUNGEN)}."
+        )
+    zusatz = "" if bedeutung == "neutral" else f" kachel--{bedeutung}"
     return (
-        f"<div class='kachel'{kante}>"
+        f"<div class='kachel{zusatz}'>"
         f"<div class='kachel-beschriftung'>{beschriftung}</div>"
         f"<div class='kachel-wert'>{wert}</div>"
         f"<div class='kachel-hinweis'>{hinweis}</div></div>"
     )
+
+
+# --------------------------------------------------------------------------
+# Tabellen
+# --------------------------------------------------------------------------
+# Die Tabellen liefen zuvor ohne ``column_config``: Streamlit riet die
+# Spaltenbreite aus dem Inhalt, Raenge standen linksbuendig neben Fliesstext,
+# und ein Anteil war von einem Rang nur am Namen zu unterscheiden.
+#
+# Die Zuordnung haengt am **angezeigten** Spaltennamen. Die Seiten benennen ihre
+# Spalten ohnehin vor der Ausgabe um; damit ist der Name die einzige Angabe, die
+# an jeder Ausgabestelle schon vorliegt.
+#
+# Ein Rang bekommt bewusst *keinen* Balken. Ein Balken fuellt sich mit
+# wachsendem Wert -- bei einem Rang waere er fuer Platz 1 am kuerzesten und
+# laege damit genau falsch herum. Als Balken erscheint deshalb das
+# Rangperzentil, das die Quelle ohnehin auf 0 bis 100 normiert und in dem 100
+# fuer den ersten Platz steht.
+
+_RANGSPALTEN = frozenset({
+    "Rang", "Rang zuvor", "Bester Rang", "Schlechtester Rang", "Mittlerer Rang",
+    "Aktueller Rang", "Meta-Rang", "Rang im Meta",
+})
+
+# Ganzzahlen ohne Nachkommastelle: Zaehlungen und Statuswerte.
+_GANZZAHLSPALTEN = frozenset({
+    "Nennungen", "Tage in der Spitze", "Wechsel in den besten 10", "Zeilen",
+    "Saetze", "Gelesen", "Geladen", "Abgewiesen", "Anfaellig", "Resistent",
+    "Immun", "Erfasste Sets", "Erfasste Pokemon", "Gefaehrdete Mitglieder",
+    "Lauf", "Initiative", "Grundwert", "Ohne Investition", "Basiswertsumme",
+    "Initiative (ohne Investition)",
+})
+
+# Nachkommastellen je Spalte, wo die Vorgabe zu grob oder zu fein waere.
+_NACHKOMMA = {
+    "Korrelation zum Start": "%.3f", "Korrelation zum Vortag": "%.3f",
+    "Dauer (s)": "%.1f s", "Hoechster Faktor": "%.2f", "Konzentration": "%.2f",
+    "Mittlere Initiative": "%.1f",
+}
+
+# Bilanzgroessen mit Nullpunkt -- das Vorzeichen ist die eigentliche Aussage.
+_VORZEICHENSPALTEN = {
+    "Veraenderung": "%+d", "Bewertung": "%+.2f", "Punktzahl": "%+.2f",
+    "Gesamtwertung": "%+.2f", "Beitrag": "%+.2f", "Mittelwert": "%+.2f",
+    "Schlechtester Fall": "%+.2f",
+}
+
+# Balken ueber einer festen Skala von 0 bis 100.
+_ANTEILSSPALTEN = frozenset({"Rangperzentil", "Vorteil in %"})
+
+# Balken ueber dem groessten beobachteten Wert: Indexgroessen ohne feste
+# Obergrenze, bei denen nur der Vergleich untereinander etwas aussagt.
+_INDEXSPALTEN = frozenset({
+    "Begegnungshaeufigkeit", "Bedrohungswert", "Risiko", "Praesenzindex",
+})
+
+# Freitext, der sonst auf eine Zeile gequetscht wird.
+_LANGTEXTSPALTEN = frozenset({
+    "Meldung", "Erlaeuterung", "Parameter", "Riskanteste Gegnerauswahl",
+    "Gegnerische Auswahl", "Auswahl", "Betroffen", "Passt zu",
+})
+
+
+def _hoechster(serie: pd.Series) -> float:
+    """Groesster Wert einer Spalte, oder 0 bei leerer bzw. leerer Spalte.
+
+    ``max()`` liefert bei einer leeren oder durchgaengig leeren Spalte ``NaN``.
+    Als Obergrenze eines Balkens waere das unbrauchbar -- und faellt erst in
+    der Anzeige auf, wo niemand mehr nach der Ursache sucht.
+    """
+    groesster = serie.max()
+    return 0.0 if pd.isna(groesster) else float(groesster)
+
+
+def _balken(serie: pd.Series, muster: str, hoechstwert: float | None = None):
+    """Balken in der Zelle, skaliert auf ``hoechstwert`` oder das Maximum."""
+    grenze = hoechstwert if hoechstwert is not None else _hoechster(serie)
+    return st.column_config.ProgressColumn(
+        format=muster, min_value=0, max_value=max(grenze, 1.0))
+
+
+def spaltenkonfiguration(df: pd.DataFrame) -> dict:
+    """Formatvorgaben fuer die Spalten eines Datenrahmens.
+
+    Unbekannte Spalten bleiben unberuehrt und behalten Streamlits Vorgabe --
+    eine Seite kann damit jederzeit eine neue Spalte ausgeben, ohne hier zuerst
+    einen Eintrag anlegen zu muessen.
+    """
+    konfiguration: dict = {}
+    for spalte in df.columns:
+        if not isinstance(spalte, str):
+            continue
+        werte = df[spalte]
+        zahl = pd.api.types.is_numeric_dtype(werte)
+
+        if spalte in _RANGSPALTEN and zahl:
+            konfiguration[spalte] = st.column_config.NumberColumn(
+                format="%d", width="small")
+        elif spalte in _VORZEICHENSPALTEN and zahl:
+            konfiguration[spalte] = st.column_config.NumberColumn(
+                format=_VORZEICHENSPALTEN[spalte], width="small")
+        elif spalte in _GANZZAHLSPALTEN and zahl:
+            konfiguration[spalte] = st.column_config.NumberColumn(
+                format="%d", width="small")
+        elif spalte in _NACHKOMMA and zahl:
+            konfiguration[spalte] = st.column_config.NumberColumn(
+                format=_NACHKOMMA[spalte], width="small")
+        elif zahl and (spalte in _ANTEILSSPALTEN or spalte.endswith("(%)")):
+            # Ueber 100 kann der feste Balken nicht hinaus; ein solcher Wert
+            # bliebe stumm bei voller Laenge stehen. Dann lieber eine Zahl.
+            konfiguration[spalte] = (
+                _balken(werte, "%.1f %%", hoechstwert=100.0)
+                if _hoechster(werte) <= 100
+                else st.column_config.NumberColumn(format="%.1f %%")
+            )
+        elif spalte in _INDEXSPALTEN and zahl:
+            konfiguration[spalte] = _balken(werte, "%.1f")
+        elif spalte in _LANGTEXTSPALTEN:
+            konfiguration[spalte] = st.column_config.TextColumn(width="large")
+
+    return konfiguration
+
+
+def tabelle(df: pd.DataFrame, hide_index: bool = True, **kwargs) -> None:
+    """Gibt einen Datenrahmen mit den Formatvorgaben des Designsystems aus.
+
+    Ersetzt den unmittelbaren Aufruf von ``st.dataframe`` in den Seitenmodulen,
+    damit dieselbe Spalte auf jeder Seite gleich aussieht.
+    """
+    st.dataframe(df, column_config=spaltenkonfiguration(df), width="stretch",
+                 hide_index=hide_index, **kwargs)
 
 
 def seitenkopf(titel: str, aufgabe: str, stand: str = "") -> None:
@@ -180,12 +320,9 @@ def datenstand(conn, kampfformat: str | None = None, tag: str | None = None) -> 
     return " · ".join(teile)
 
 
-AMPEL_FARBEN = {"gruen": "#2ecc71", "gelb": "#f1c40f", "rot": "#e74c3c"}
-
-
-def ampel(stufe: str, text: str) -> str:
-    """Ampelzeile fuer den Qualitaetsbericht."""
-    farbe = AMPEL_FARBEN.get(stufe, "#95a5a6")
+def befundzeile(stufe: str, text: str) -> str:
+    """Zeile des Qualitaetsberichts, mit einem Punkt in der Farbe der Stufe."""
+    farbe = design.STUFEN_FARBEN.get(stufe, design.GRAU_MITTE)
     return f"<span style='color:{farbe};font-size:1.1rem;'>●</span> {text}"
 
 

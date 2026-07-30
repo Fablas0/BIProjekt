@@ -12,13 +12,19 @@ import streamlit as st
 
 from ..analytics import kpi, speed, threat
 from ..config import TYP_DEUTSCH
+from . import design
 from .komponenten import (
     hinweis_leere_datenbank,
     hole_verbindung,
     kennzahl_kachel,
     kopfauswahl,
     seitenkopf,
+    tabelle,
 )
+
+# Ab wie vielen der 18 Verteidigungstypen die offensive Reichweite als
+# ausreichend gilt.
+REICHWEITE_AUSREICHEND_AB = 12
 
 
 def zeichne() -> None:
@@ -86,18 +92,19 @@ def _zeige_bewertung(conn, team: pd.DataFrame, namen: list[str], monat: str,
     spalten = st.columns(4)
     spalten[0].markdown(kennzahl_kachel(
         "Teamgroesse", f"{len(team)} / 6",
-        "gewaehlte Pokemon", "#6390F0"), unsafe_allow_html=True)
+        "gewaehlte Pokemon"), unsafe_allow_html=True)
     spalten[1].markdown(kennzahl_kachel(
         "Kritische Schwaechen", str(ungedeckt),
         "Angriffstypen ohne Deckung",
-        "#e74c3c" if ungedeckt else "#2ecc71"), unsafe_allow_html=True)
+        "gefahr" if ungedeckt else "guenstig"), unsafe_allow_html=True)
     spalten[2].markdown(kennzahl_kachel(
         "Offensive Reichweite", f"{getroffen} / 18",
         "Typen mit sehr effektivem Zugriff",
-        "#2ecc71" if getroffen >= 12 else "#f1c40f"), unsafe_allow_html=True)
+        "guenstig" if getroffen >= REICHWEITE_AUSREICHEND_AB else "gefahr"),
+        unsafe_allow_html=True)
     spalten[3].markdown(kennzahl_kachel(
         "Mittlerer Meta-Rang", f"{mittlerer_rang:.0f}",
-        "kleiner ist gaengiger", "#A33EA1"), unsafe_allow_html=True)
+        "kleiner ist gaengiger"), unsafe_allow_html=True)
 
     if gesamtrisiko > 60:
         st.error(
@@ -130,25 +137,23 @@ def _zeige_partner(conn, team: pd.DataFrame, namen: list[str], monat: str,
     for spalte, (_, zeile) in zip(spalten, vorschlaege.head(4).iterrows(), strict=False):
         with spalte:
             st.markdown(
-                f"<div style='text-align:center;padding:10px;border-radius:12px;"
-                f"background:rgba(46,204,113,0.10);'>"
+                "<div class='karte karte--guenstig'>"
                 f"<div style='font-weight:700;'>{zeile['partner']}</div>"
                 f"<div style='font-size:0.82rem;margin-top:4px;'>genannt bei "
                 f"<b>{int(zeile['nennungen'])}</b> Teammitglied(ern)</div>"
                 f"<div style='font-size:0.78rem;opacity:0.8;'>bester Rang "
                 f"{int(zeile['bester_rang'])}</div>"
                 f"<div style='font-size:0.74rem;opacity:0.7;'>passt zu {zeile['passt_zu']}</div>"
-                f"</div>", unsafe_allow_html=True,
+                "</div>", unsafe_allow_html=True,
             )
 
     st.markdown("")
-    st.dataframe(
+    tabelle(
         vorschlaege.rename(columns={
             "partner": "Vorschlag", "nennungen": "Nennungen",
             "bester_rang": "Bester Rang", "mittlerer_rang": "Mittlerer Rang",
             "passt_zu": "Passt zu",
         })[["Vorschlag", "Nennungen", "Bester Rang", "Mittlerer Rang", "Passt zu"]],
-        width="stretch", hide_index=True,
     )
 
 
@@ -167,9 +172,11 @@ def _zeige_defensive(conn, team: pd.DataFrame, monat: str, kampfformat: str) -> 
         columns=team["anzeigename"].tolist(),
     )
 
+    # Hier ist ein hoher Wert der schlechte: der Faktor misst den Schaden, den
+    # das eigene Team einsteckt. Der Verlauf laeuft deshalb umgekehrt.
     abbildung = px.imshow(
         matrix, text_auto=True, aspect="auto",
-        color_continuous_scale=["#1a5c2a", "#2ecc71", "#f5f5f5", "#e67e22", "#c0392b"],
+        color_continuous_scale=design.VERLAUF_ANFAELLIGKEIT,
         color_continuous_midpoint=1.0,
         labels={"x": "", "y": "Angriffstyp", "color": "Faktor"},
         title="Schadensmultiplikatoren je Teammitglied",
@@ -206,7 +213,11 @@ def _zeige_offensive(conn, namen: list[str], monat: str, kampfformat: str) -> No
     abbildung = px.bar(
         anzeige.sort_values("beste_wirkung"), x="beste_wirkung", y="verteidigungstyp",
         orientation="h", color="beste_wirkung",
-        color_continuous_scale=["#c0392b", "#e67e22", "#f5f5f5", "#2ecc71"],
+        color_continuous_scale=design.VERLAUF_BILANZ,
+        # Faktor 1 ist der neutrale Schaden -- darunter wird abgewehrt, darueber
+        # getroffen. Ohne diesen Mittelpunkt laege die Grenze beim Mittelwert
+        # der Auswahl und verschoebe sich mit jedem Team.
+        color_continuous_midpoint=1.0,
         labels={"beste_wirkung": "Bester Schadensfaktor", "verteidigungstyp": ""},
         title="Offensive Reichweite gegen die 18 Verteidigungstypen",
         text_auto=".2f", height=560,
@@ -250,17 +261,17 @@ def _zeige_initiative(conn, team: pd.DataFrame, monat: str, kampfformat: str) ->
         tiers, x="speed_real", nbins=30,
         labels={"speed_real": "Initiative (Stufe 50)", "count": "Anzahl Sets"},
         title="Initiative des Teams im Vergleich zum Metagame",
-        color_discrete_sequence=["#4a5568"], height=460,
+        color_discrete_sequence=[design.GRAU_FLAECHE], height=460,
     )
     for _, zeile in einordnung.iterrows():
         abbildung.add_vline(
-            x=zeile["Initiative"], line_dash="dash", line_color="#EF553B",
+            x=zeile["Initiative"], line_dash="dash", line_color=design.BLAU_HELL,
             annotation_text=f"{zeile['Pokemon']} ({zeile['Initiative']})",
             annotation_position="top",
         )
     st.plotly_chart(abbildung, width="stretch")
 
-    st.dataframe(einordnung, width="stretch", hide_index=True)
+    tabelle(einordnung)
 
     st.caption(
         "Die Initiative ist aus Basiswert, Wesen und Fleisspunkten des jeweils "

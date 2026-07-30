@@ -22,8 +22,9 @@ from bi import quality, warehouse  # noqa: E402
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prueft die Qualitaet des Data Warehouse.")
-    parser.add_argument("--mindestindex", type=float, default=90.0,
-                        help="Erforderlicher Qualitaetsindex in Prozent (Standard: 90)")
+    parser.add_argument("--mindestindex", type=float, default=quality.MINDESTINDEX,
+                        help="Erforderlicher Qualitaetsindex in Prozent "
+                             f"(Standard: {quality.MINDESTINDEX:.0f})")
     parser.add_argument("--db", help="Abweichender Pfad zur Datenbankdatei")
     argumente = parser.parse_args(argv)
 

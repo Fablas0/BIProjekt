@@ -13,6 +13,7 @@ import streamlit as st
 
 from ..analytics import kpi
 from ..config import TYP_FARBEN
+from . import design
 from .komponenten import (
     hinweis_leere_datenbank,
     hinweis_messniveau,
@@ -21,7 +22,23 @@ from .komponenten import (
     kopfauswahl,
     pokemon_karte,
     seitenkopf,
+    tabelle,
 )
+
+# Ab welcher Rangkorrelation das Format als stabil bzw. als in Bewegung gilt.
+# Kachel und Erlaeuterungstext lesen dieselben Grenzen -- sonst faerbt sich die
+# Kachel guenstig, waehrend darunter eine Warnung steht.
+STABIL_AB = 0.99
+BEWEGT_UNTER = 0.90
+
+
+def _stabilitaet_bedeutung(wert: float | None) -> str:
+    """Aussage der Stabilitaetskachel: verlaessliche Vorbereitung oder nicht."""
+    if wert is None:
+        return "neutral"
+    if wert >= STABIL_AB:
+        return "guenstig"
+    return "gefahr" if wert < BEWEGT_UNTER else "neutral"
 
 
 def zeichne() -> None:
@@ -55,17 +72,18 @@ def zeichne() -> None:
     stabilitaet = werte.get("stabilitaet")
     kacheln = [
         ("Erfasste Pokemon", str(werte["erfasste_pokemon"]),
-         "mit vergebenem Nutzungsrang", "#6390F0"),
-        ("Spitzenreiter", str(werte["spitzenreiter"]), "Rang 1 des Tages", "#F7D02C"),
+         "mit vergebenem Nutzungsrang", "neutral"),
+        ("Spitzenreiter", str(werte["spitzenreiter"]), "Rang 1 des Tages", "neutral"),
         ("Meta-Stabilitaet", f"{stabilitaet:.3f}" if stabilitaet is not None else "-",
-         "Rangkorrelation zum ersten Tag", "#A33EA1"),
+         "Rangkorrelation zum ersten Tag", _stabilitaet_bedeutung(stabilitaet)),
         ("Beobachtete Tage", str(werte["beobachtete_tage"]),
-         "in der laufenden Saison", "#7AC74C"),
+         "in der laufenden Saison", "neutral"),
         ("Typen in der Spitze", str(werte["typen_vielfalt"]),
-         "vertretene Typen", "#EE8130"),
+         "vertretene Typen", "neutral"),
     ]
-    for spalte, (titel, wert, hinweis, farbe) in zip(spalten, kacheln, strict=True):
-        spalte.markdown(kennzahl_kachel(titel, wert, hinweis, farbe), unsafe_allow_html=True)
+    for spalte, (titel, wert, hinweis, bedeutung) in zip(spalten, kacheln, strict=True):
+        spalte.markdown(kennzahl_kachel(titel, wert, hinweis, bedeutung),
+                        unsafe_allow_html=True)
 
     hinweis_messniveau()
 
@@ -121,7 +139,7 @@ def _zeige_rangliste(conn, tag: str, kampfformat: str) -> None:
                 ), unsafe_allow_html=True,
             )
 
-    st.dataframe(
+    tabelle(
         top.rename(columns={
             "rang": "Rang", "anzeigename": "Pokemon", "typ_kombination": "Typen",
             "rolle": "Rolle", "rang_perzentil": "Rangperzentil",
@@ -129,7 +147,7 @@ def _zeige_rangliste(conn, tag: str, kampfformat: str) -> None:
             "basiswert_summe": "Basiswertsumme",
         })[["Rang", "Pokemon", "Typen", "Rolle", "Rangperzentil",
             "Initiative (ohne Investition)", "Basiswertsumme"]],
-        width="stretch", hide_index=True, height=420,
+        height=420,
     )
 
 
@@ -151,12 +169,12 @@ def _zeige_stabilitaet(conn, kampfformat: str) -> None:
     abbildung.add_trace(go.Scatter(
         x=verlauf["datum_iso"], y=verlauf["stabilitaet_zum_start"],
         name="Korrelation zum ersten Tag", mode="lines+markers",
-        line={"width": 3, "color": "#EF553B"},
+        line={"width": 3, "color": design.DIAGRAMM_FOLGE[0]},
     ))
     abbildung.add_trace(go.Scatter(
         x=verlauf["datum_iso"], y=verlauf["stabilitaet_zum_vortag"],
         name="Korrelation zum Vortag", mode="lines+markers",
-        line={"width": 2, "color": "#6390F0", "dash": "dot"},
+        line={"width": 2, "color": design.DIAGRAMM_FOLGE[1], "dash": "dot"},
     ))
     abbildung.update_layout(
         title="Meta-Stabilitaet im Zeitverlauf",
@@ -167,26 +185,24 @@ def _zeige_stabilitaet(conn, kampfformat: str) -> None:
 
     letzte = verlauf.iloc[-1]
     wert = letzte["stabilitaet_zum_start"]
-    if wert is not None and wert >= 0.99:
+    if wert is not None and wert >= STABIL_AB:
         st.info(
             f"**Das Format ist sehr stabil** (Korrelation {wert:.3f} zum ersten "
             "geladenen Tag). Die Rangfolge hat sich im Betrachtungszeitraum kaum "
             "veraendert -- Vorbereitung auf den aktuellen Stand ist verlaesslich."
         )
-    elif wert is not None and wert < 0.9:
+    elif wert is not None and wert < BEWEGT_UNTER:
         st.warning(
             f"**Das Format ist in Bewegung** (Korrelation nur {wert:.3f}). Die "
             "Rangfolge hat sich deutlich umsortiert; eine Vorbereitung auf aeltere "
             "Staende ist riskant."
         )
 
-    st.dataframe(
-        verlauf.rename(columns={
-            "datum_iso": "Tag", "stabilitaet_zum_start": "Korrelation zum Start",
-            "stabilitaet_zum_vortag": "Korrelation zum Vortag",
-            "top10_fluktuation": "Wechsel in den besten 10",
-        }), width="stretch", hide_index=True,
-    )
+    tabelle(verlauf.rename(columns={
+        "datum_iso": "Tag", "stabilitaet_zum_start": "Korrelation zum Start",
+        "stabilitaet_zum_vortag": "Korrelation zum Vortag",
+        "top10_fluktuation": "Wechsel in den besten 10",
+    }))
 
 
 def _zeige_bewegung(conn, tag: str, kampfformat: str) -> None:
@@ -218,7 +234,7 @@ def _zeige_bewegung(conn, tag: str, kampfformat: str) -> None:
         auf = verwertbar.nlargest(8, "veraenderung")
         abbildung = px.bar(
             auf.sort_values("veraenderung"), x="veraenderung", y="anzeigename",
-            orientation="h", color_discrete_sequence=["#2ecc71"],
+            orientation="h", color_discrete_sequence=[design.GRUEN],
             labels={"veraenderung": "Rangplaetze gutgemacht", "anzeigename": ""},
             text_auto="+d", height=340,
         )
@@ -230,7 +246,7 @@ def _zeige_bewegung(conn, tag: str, kampfformat: str) -> None:
         abbildung = px.bar(
             ab.sort_values("veraenderung", ascending=False),
             x="veraenderung", y="anzeigename", orientation="h",
-            color_discrete_sequence=["#e74c3c"],
+            color_discrete_sequence=[design.POKEMON_ROT],
             labels={"veraenderung": "Rangplaetze verloren", "anzeigename": ""},
             text_auto="+d", height=340,
         )
@@ -243,13 +259,13 @@ def _zeige_bewegung(conn, tag: str, kampfformat: str) -> None:
                 f"{z['anzeigename']} (Rang {int(z['rang'])})"
                 for _, z in neu.head(6).iterrows()))
 
-    st.dataframe(
+    tabelle(
         bewegung.rename(columns={
             "anzeigename": "Pokemon", "rang": "Rang", "vorher_rang": "Rang zuvor",
             "veraenderung": "Veraenderung", "richtung": "Tendenz",
             "typ_kombination": "Typen", "rolle": "Rolle",
         })[["Pokemon", "Rang", "Rang zuvor", "Veraenderung", "Tendenz", "Rolle"]],
-        width="stretch", hide_index=True, height=380,
+        height=380,
     )
 
 
@@ -270,23 +286,23 @@ def _zeige_bestaendigkeit(conn, kampfformat: str) -> None:
     abbildung = px.bar(
         df.head(20).sort_values("anteil_tage"), x="anteil_tage", y="anzeigename",
         orientation="h", color="bestaendigkeit",
-        color_discrete_map={"Dauerhaft": "#2ecc71", "Etabliert": "#7AC74C",
-                            "Schwankend": "#f1c40f", "Kurzzeitig": "#e74c3c"},
+        color_discrete_map=design.abstufung_farben(
+            ["Dauerhaft", "Etabliert", "Schwankend", "Kurzzeitig"]),
         labels={"anteil_tage": "Anteil der Tage in der Spitzengruppe (%)",
                 "anzeigename": "", "bestaendigkeit": "Einstufung"},
         text_auto=".0f", height=560,
     )
     st.plotly_chart(abbildung, width="stretch")
 
-    st.dataframe(
+    tabelle(
         df.rename(columns={
             "anzeigename": "Pokemon", "tage_in_top": "Tage in der Spitze",
             "anteil_tage": "Anteil (%)", "bester_rang": "Bester Rang",
-            "schlechtester_rang": "Schlechtester Rang", "aktueller_rang": "Aktuell",
-            "bestaendigkeit": "Einstufung",
+            "schlechtester_rang": "Schlechtester Rang",
+            "aktueller_rang": "Aktueller Rang", "bestaendigkeit": "Einstufung",
         })[["Pokemon", "Tage in der Spitze", "Anteil (%)", "Bester Rang",
-            "Schlechtester Rang", "Aktuell", "Einstufung"]],
-        width="stretch", hide_index=True, height=400,
+            "Schlechtester Rang", "Aktueller Rang", "Einstufung"]],
+        height=400,
     )
 
 
@@ -313,7 +329,8 @@ def _zeige_struktur(conn, tag: str, kampfformat: str) -> None:
             rollen, x="anzahl", y="rolle", orientation="h",
             labels={"anzahl": "Anzahl Pokemon", "rolle": ""},
             title="Abgeleitete Teamrollen der besten 50",
-            color="anzahl", color_continuous_scale="Sunset", text_auto=True,
+            color="anzahl", color_continuous_scale=design.VERLAUF_NEUTRAL,
+            text_auto=True,
         )
         abbildung.update_layout(showlegend=False, coloraxis_showscale=False,
                                 yaxis={"categoryorder": "total ascending"})

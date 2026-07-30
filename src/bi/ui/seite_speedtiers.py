@@ -15,12 +15,14 @@ import streamlit as st
 from ..analytics import kpi, speed
 from ..config import sprite_url
 from ..stats import SZENARIEN
+from . import design
 from .komponenten import (
     hinweis_leere_datenbank,
     hole_verbindung,
     kennzahl_kachel,
     kopfauswahl,
     seitenkopf,
+    tabelle,
 )
 
 
@@ -100,20 +102,22 @@ def _zeige_eckwerte(tiers: pd.DataFrame, meta: pd.DataFrame) -> None:
     bizarroraum_anteil = 100 * tiers.loc[tiers["ist_bizarroraum_set"], "gewicht"].sum() / max(
         tiers["gewicht"].sum(), 1e-9)
 
+    # Vier Beschreibungen des Metagames, keine Bewertung des eigenen Teams --
+    # entsprechend traegt keine der Kacheln eine Aussage.
     spalten = st.columns(4)
     spalten[0].markdown(kennzahl_kachel(
         "Schnellstes Set", str(int(schnellstes["speed_real"])),
-        f"{schnellstes['anzeigename']} ({schnellstes['wesen']})", "#F7D02C"),
+        f"{schnellstes['anzeigename']} ({schnellstes['wesen']})"),
         unsafe_allow_html=True)
     spalten[1].markdown(kennzahl_kachel(
         "Median des Metagames", str(median),
-        "Haelfte der Sets liegt darunter", "#6390F0"), unsafe_allow_html=True)
+        "Haelfte der Sets liegt darunter"), unsafe_allow_html=True)
     spalten[2].markdown(kennzahl_kachel(
         "Gewinn durch Training", f"+{mittlere_abweichung:.0f}",
-        "gegenueber dem Grundwert", "#7AC74C"), unsafe_allow_html=True)
+        "gegenueber dem Grundwert"), unsafe_allow_html=True)
     spalten[3].markdown(kennzahl_kachel(
         "Bizarroraum-Sets", f"{bizarroraum_anteil:.1f} %",
-        "bewusst langsam gespielt", "#A33EA1"), unsafe_allow_html=True)
+        "bewusst langsam gespielt"), unsafe_allow_html=True)
 
 
 def _zeige_tierliste(tiers: pd.DataFrame, team: list[str]) -> None:
@@ -124,8 +128,8 @@ def _zeige_tierliste(tiers: pd.DataFrame, team: list[str]) -> None:
         verteilung, x="gewicht", y="band", orientation="h",
         labels={"gewicht": "Begegnungshaeufigkeit", "band": "Initiative"},
         title="Wo sich das Metagame ballt",
-        color="gewicht", color_continuous_scale="Sunset", text_auto=".0f",
-        height=max(420, 22 * len(verteilung)),
+        color="gewicht", color_continuous_scale=design.VERLAUF_NEUTRAL,
+        text_auto=".0f", height=max(420, 22 * len(verteilung)),
     )
     # Die Baender sind Texte; ohne ausdrueckliche Reihenfolge wuerden sie
     # alphabetisch sortiert und '20-29' erschiene hinter '180-189'.
@@ -153,11 +157,11 @@ def _zeige_tierliste(tiers: pd.DataFrame, team: list[str]) -> None:
         "set_anteil": "Anteil des Sets (%)", "usage_rang": "Meta-Rang",
         "gewicht": "Begegnungshaeufigkeit",
     })
-    st.dataframe(
+    tabelle(
         anzeige[["Pokemon", "Grundwert", "Initiative", "Set",
                  "Anteil des Sets (%)", "Meta-Rang", "Begegnungshaeufigkeit",
                  "Eigenes Team"]],
-        width="stretch", hide_index=True, height=460,
+        height=460,
     )
 
 
@@ -179,14 +183,17 @@ def _zeige_teamvergleich(conn, tiers: pd.DataFrame, team: list[str], monat: str,
         st.warning("Fuer die Auswahl liegen keine Verteilungen vor.")
         return
 
+    # Das Metagame ist hier Hintergrund, die eigenen Pokemon sind die Aussage.
+    # Die Bezugslinien tragen deshalb die Farbe der Bedienelemente -- sie zeigen
+    # die eigene Auswahl. Rot waere hier eine Bedrohung, die sie nicht sind.
     abbildung = go.Figure()
     abbildung.add_trace(go.Histogram(
         x=tiers["speed_real"], nbinsx=30, name="Metagame",
-        marker_color="#4a5568", opacity=0.75,
+        marker_color=design.GRAU_FLAECHE, opacity=0.75,
     ))
     for _, zeile in einordnung.iterrows():
         abbildung.add_vline(
-            x=zeile["Initiative"], line_dash="dash", line_color="#EF553B",
+            x=zeile["Initiative"], line_dash="dash", line_color=design.BLAU_HELL,
             annotation_text=f"{zeile['Pokemon']} ({zeile['Initiative']})",
             annotation_position="top",
         )
@@ -197,7 +204,7 @@ def _zeige_teamvergleich(conn, tiers: pd.DataFrame, team: list[str], monat: str,
     )
     st.plotly_chart(abbildung, width="stretch")
 
-    st.dataframe(einordnung, width="stretch", hide_index=True)
+    tabelle(einordnung)
 
     langsam = einordnung[einordnung["Ueberholt (%)"] < 30]
     if not langsam.empty and szenario == "normal":
@@ -226,17 +233,17 @@ def _zeige_szenarien(conn, team: list[str], monat: str, kampfformat: str) -> Non
         labels={"Ueberholt im Mittel (%)": "Anteil des Metagames, der ueberholt wird (%)",
                 "Szenario": ""},
         title="Wirkung der Szenarien auf die Initiative des Teams",
-        color="Ueberholt im Mittel (%)", color_continuous_scale="RdYlGn",
+        color="Ueberholt im Mittel (%)", color_continuous_scale=design.VERLAUF_BILANZ,
+        # Die Haelfte des Metagames zu ueberholen ist der Gleichstand; erst der
+        # Abstand dazu ist ein Vor- oder Nachteil.
+        color_continuous_midpoint=50,
         text_auto=".1f", height=420,
     )
     abbildung.update_layout(coloraxis_showscale=False)
     st.plotly_chart(abbildung, width="stretch")
 
-    st.dataframe(
-        uebersicht[["Szenario", "Mittlere Initiative", "Ueberholt im Mittel (%)",
-                    "Schnellstes Mitglied", "Erlaeuterung"]],
-        width="stretch", hide_index=True,
-    )
+    tabelle(uebersicht[["Szenario", "Mittlere Initiative", "Ueberholt im Mittel (%)",
+                        "Schnellstes Mitglied", "Erlaeuterung"]])
 
     ohne = uebersicht[uebersicht["schluessel"] == "normal"]
     mit = uebersicht[uebersicht["schluessel"] == "rueckenwind"]
@@ -285,19 +292,21 @@ def _zeige_benchmark(conn, meta: pd.DataFrame, monat: str, kampfformat: str) -> 
         st.warning("Fuer mindestens eines der beiden Pokemon liegt keine Verteilung vor.")
         return
 
+    # Die ersten beiden Kacheln nennen die Ausgangslage, die dritte enthaelt die
+    # Antwort auf die Frage der Seite -- nur sie traegt eine Aussage.
     spalten = st.columns(3)
     spalten[0].markdown(kennzahl_kachel(
         f"{ergebnis['ziel']}", str(ergebnis["ziel_initiative"]),
-        f"gaengigstes Set: {ergebnis['ziel_set']}", "#e74c3c"), unsafe_allow_html=True)
+        f"gaengigstes Set: {ergebnis['ziel_set']}"), unsafe_allow_html=True)
     spalten[1].markdown(kennzahl_kachel(
         f"{ergebnis['angreifer']} aktuell", str(ergebnis["aktuelle_initiative"]),
-        f"Basiswert {ergebnis['angreifer_basiswert']}", "#6390F0"), unsafe_allow_html=True)
+        f"Basiswert {ergebnis['angreifer_basiswert']}"), unsafe_allow_html=True)
 
     if ergebnis["erreichbar"]:
         rest = 66 - ergebnis["benoetigte_punkte"]
         spalten[2].markdown(kennzahl_kachel(
             "Benoetigte Statuspunkte", str(ergebnis["benoetigte_punkte"]),
-            f"{rest} von 66 bleiben frei", "#2ecc71"), unsafe_allow_html=True)
+            f"{rest} von 66 bleiben frei", "guenstig"), unsafe_allow_html=True)
         st.success(
             f"Mit **{ergebnis['benoetigte_punkte']} Statuspunkten** in Initiative und dem "
             f"Wesen **{wesen}** handelt {ergebnis['angreifer']} vor "
@@ -308,7 +317,7 @@ def _zeige_benchmark(conn, meta: pd.DataFrame, monat: str, kampfformat: str) -> 
     else:
         spalten[2].markdown(kennzahl_kachel(
             "Benoetigte Statuspunkte", "nicht erreichbar",
-            "auch mit maximaler Investition", "#e74c3c"), unsafe_allow_html=True)
+            "auch mit maximaler Investition", "gefahr"), unsafe_allow_html=True)
         st.error(
             f"{ergebnis['angreifer']} kann {ergebnis['ziel']} auch mit maximaler "
             f"Investition und dem Wesen {wesen} nicht ueberholen. Hier helfen nur ein "
@@ -333,8 +342,8 @@ def _zeige_vorhersagbarkeit(conn, monat: str, kampfformat: str) -> None:
     abbildung = px.bar(
         df.sort_values("top_anteil"), x="top_anteil", y="anzeigename", orientation="h",
         color="einstufung",
-        color_discrete_map={"Sehr hoch": "#2ecc71", "Hoch": "#7AC74C",
-                            "Mittel": "#f1c40f", "Gering": "#e74c3c"},
+        color_discrete_map=design.abstufung_farben(
+            ["Sehr hoch", "Hoch", "Mittel", "Gering"]),
         hover_data=["konzentration"],
         labels={"top_anteil": "Anteil des haeufigsten Sets (%)", "anzeigename": "",
                 "einstufung": "Vorhersagbarkeit"},
@@ -360,8 +369,7 @@ def _zeige_vorhersagbarkeit(conn, monat: str, kampfformat: str) -> None:
                 "typ1": None, "typ2": None,
             })
             st.markdown(
-                f"<div style='text-align:center;padding:8px;border-radius:10px;"
-                f"background:rgba(128,128,128,0.08);'>"
+                "<div class='karte'>"
                 f"<img src='{sprite_url(int(meta_zeile['pokedex_id']))}' width='92'>"
                 f"<div style='font-weight:700;font-size:0.9rem;'>{zeile['anzeigename']}</div>"
                 f"<div style='font-size:0.74rem;opacity:0.8;margin-top:3px;'>"
@@ -371,7 +379,7 @@ def _zeige_vorhersagbarkeit(conn, monat: str, kampfformat: str) -> None:
                 f"</div>", unsafe_allow_html=True,
             )
 
-    st.dataframe(
+    tabelle(
         df.rename(columns={
             "anzeigename": "Pokemon", "usage_rang": "Meta-Rang",
             "top_anteil": "Anteil des Top-Sets (%)", "top_set": "Haeufigstes Set",
@@ -380,5 +388,4 @@ def _zeige_vorhersagbarkeit(conn, monat: str, kampfformat: str) -> None:
         })[["Pokemon", "Meta-Rang", "Haeufigstes Set", "Initiative",
             "Anteil des Top-Sets (%)", "Konzentration", "Erfasste Sets",
             "Vorhersagbarkeit"]],
-        width="stretch", hide_index=True,
     )
