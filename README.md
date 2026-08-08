@@ -465,7 +465,7 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 │   │   └── preview.py            Team-Preview-Advisor
 │   └── ui/                       acht Seitenmodule + gemeinsame Bausteine
 ├── scripts/                      kopflose ETL- und Prüfläufe
-├── tests/                        243 Tests
+├── tests/                        246 Tests
 └── .github/workflows/            CI und täglicher Ladelauf
 ```
 

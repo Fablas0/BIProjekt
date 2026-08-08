@@ -154,12 +154,26 @@ def regel_rang_eindeutig(conn: sqlite3.Connection) -> Pruefergebnis:
 # Vollstaendigkeit
 # --------------------------------------------------------------------------
 
-def regel_archiv_lueckenlos(conn: sqlite3.Connection) -> Pruefergebnis:
+def regel_archiv_lueckenlos(conn: sqlite3.Connection,
+                            heute: date | None = None) -> Pruefergebnis:
     """Das Archiv soll eine lueckenlose Tagesfolge enthalten.
 
-    Die Quelle haelt nur rund zwei Wochen vor. Ein ausgelassener Ladelauf
-    hinterlaesst deshalb eine dauerhafte Luecke, die sich nicht mehr schliessen
-    laesst -- das muss auffallen, solange sich noch etwas retten laesst.
+    Entscheidend ist das **Alter** der Luecke, nicht ihr blosses Vorhandensein.
+    Die Quelle haelt rund zwei Wochen vor:
+
+    * Ein fehlender Tag **innerhalb** dieser Frist ist ein Auftrag -- er laesst
+      sich noch holen, und genau dafuer gibt es den taeglichen Lauf. Die Regel
+      faellt durch, damit der Lauf rot wird und jemand hinsieht.
+    * Ein fehlender Tag **ausserhalb** der Frist ist eine Tatsache. Er ist
+      unwiederbringlich, und ihn taeglich erneut als Fehler zu melden faerbt
+      den Lauf dauerhaft rot -- womit die Farbe aufhoert, etwas zu bedeuten.
+      Er erscheint deshalb weiter im Bericht, aber als Feststellung.
+
+    Zuvor behauptete die Meldung ausnahmslos, fehlende Staende seien "an der
+    Quelle nicht mehr abrufbar" -- ohne das zu pruefen. Bei einer erst wenige
+    Tage alten Luecke war das schlicht falsch und riet vom Naheliegenden ab.
+    Pokemon Champions hat Tagesstaende schon um sechs Tage verspaetet
+    nachgereicht; ein Lauf innerhalb der Frist holt sie dann von selbst nach.
     """
     tage = [z[0] for z in conn.execute(
         "SELECT DISTINCT datum_iso FROM Archiv_Champions ORDER BY datum_iso")]
@@ -174,13 +188,35 @@ def regel_archiv_lueckenlos(conn: sqlite3.Connection) -> Pruefergebnis:
                 for i in range((letzter - erster).days + 1)}
     fehlend = sorted(erwartet - set(tage))
 
+    if not fehlend:
+        return Pruefergebnis(
+            "Lueckenlosigkeit des Archivs", "Vollstaendigkeit", True,
+            f"{len(tage)} Tage von {tage[0]} bis {tage[-1]}, ohne Luecken.", 0,
+        )
+
+    stichtag = (heute or date.today()) - timedelta(days=QUELLE_VORHALTUNG_TAGE)
+    holbar = [t for t in fehlend if date.fromisoformat(t) >= stichtag]
+    verloren = [t for t in fehlend if date.fromisoformat(t) < stichtag]
+
+    if holbar:
+        return Pruefergebnis(
+            "Lueckenlosigkeit des Archivs", "Vollstaendigkeit", False,
+            f"{len(holbar)} fehlende Tage liegen noch in der Vorhaltezeit und "
+            f"sind zu holen: {', '.join(holbar[:5])}. Letzte Gelegenheit fuer "
+            f"{holbar[0]} ist der "
+            f"{(date.fromisoformat(holbar[0]) + timedelta(days=QUELLE_VORHALTUNG_TAGE)).isoformat()}."
+            + (f" Weitere {len(verloren)} Tage sind bereits aus der Vorhaltezeit "
+               "gefallen." if verloren else ""),
+            len(holbar),
+        )
+
     return Pruefergebnis(
-        "Lueckenlosigkeit des Archivs", "Vollstaendigkeit", not fehlend,
-        f"{len(tage)} Tage von {tage[0]} bis {tage[-1]}, ohne Luecken."
-        if not fehlend else
-        f"{len(fehlend)} fehlende Tage, darunter {', '.join(fehlend[:5])}. "
-        "Diese Staende sind an der Quelle nicht mehr abrufbar.",
-        len(fehlend),
+        "Lueckenlosigkeit des Archivs", "Vollstaendigkeit", True,
+        f"{len(tage)} Tage von {tage[0]} bis {tage[-1]}. "
+        f"{len(verloren)} Tage fehlen dauerhaft ({', '.join(verloren[:5])}) -- "
+        "sie waren an der Quelle nie verfuegbar oder sind aus deren "
+        f"Vorhaltezeit von {QUELLE_VORHALTUNG_TAGE} Tagen gefallen.",
+        len(verloren),
     )
 
 

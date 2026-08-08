@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import gzip
 import json
+from contextlib import contextmanager
+from datetime import date
 
 import pytest
 
@@ -318,15 +320,94 @@ def test_import_aus_leerem_verzeichnis_bleibt_stabil(conn, tmp_path) -> None:
         "dateien": 0, "saetze": 0}
 
 
-def test_archivluecke_wird_erkannt(conn) -> None:
-    """Ein ausgelassener Ladelauf hinterlaesst eine nicht schliessbare Luecke."""
+def test_archivluecke_innerhalb_der_vorhaltezeit_faellt_durch(conn) -> None:
+    """Eine frische Luecke ist ein Auftrag: der Tag laesst sich noch holen.
+
+    Der Stichtag wird ausdruecklich uebergeben. Ohne ihn haenge das Ergebnis am
+    Kalender des Rechners, auf dem der Test laeuft -- dieselbe Pruefung waere
+    heute rot und in drei Wochen gruen.
+    """
     champions.archiviere(
         conn, [_abzug(datum="2026-07-20"), _abzug(datum="2026-07-23")], lauf_id=1)
 
-    ergebnis = quality.regel_archiv_lueckenlos(conn)
+    ergebnis = quality.regel_archiv_lueckenlos(conn, heute=date(2026, 7, 25))
     assert not ergebnis.bestanden
     assert "2026-07-21" in ergebnis.befund
     assert ergebnis.betroffen == 2
+    # Die Meldung muss sagen, bis wann sich der Tag noch retten laesst.
+    assert "2026-08-04" in ergebnis.befund
+
+
+def test_archivluecke_ausserhalb_der_vorhaltezeit_faerbt_nicht_mehr_rot(conn) -> None:
+    """Eine alte Luecke ist eine Tatsache, kein taeglich neuer Alarm.
+
+    Sie bleibt im Bericht sichtbar -- aber sie darf den Lauf nicht dauerhaft rot
+    faerben, sonst hoert die Farbe auf, etwas zu bedeuten.
+    """
+    champions.archiviere(
+        conn, [_abzug(datum="2026-07-20"), _abzug(datum="2026-07-23")], lauf_id=1)
+
+    ergebnis = quality.regel_archiv_lueckenlos(conn, heute=date(2026, 8, 30))
+    assert ergebnis.bestanden
+    assert "dauerhaft" in ergebnis.befund
+    assert "2026-07-21" in ergebnis.befund
+
+
+def test_archivluecke_meldet_keine_falsche_unwiederbringlichkeit(conn) -> None:
+    """Eine noch holbare Luecke darf nicht als verloren gemeldet werden.
+
+    Genau das tat die Regel zuvor: sie behauptete ausnahmslos, fehlende Staende
+    seien "an der Quelle nicht mehr abrufbar" -- ohne das Alter zu pruefen. Wer
+    das las, hoerte auf zu suchen, obwohl noch Tage Zeit blieben.
+    """
+    champions.archiviere(
+        conn, [_abzug(datum="2026-07-20"), _abzug(datum="2026-07-23")], lauf_id=1)
+
+    ergebnis = quality.regel_archiv_lueckenlos(conn, heute=date(2026, 7, 25))
+    assert "nicht mehr abrufbar" not in ergebnis.befund
+
+
+def test_nicht_abrufbarer_tagesstand_wird_zum_befund(conn, monkeypatch) -> None:
+    """Ein angebotener, aber nicht ladbarer Tag darf nicht lautlos verschwinden.
+
+    Die Fehlversuche wurden zuvor gesammelt und dann weggeworfen: der Lauf
+    meldete Erfolg, das Archiv blieb unvollstaendig, und aufgefallen waere es
+    erst, wenn die Quelle den Tag laengst vergessen hat -- also dann, wenn sich
+    nichts mehr retten laesst. Genau diese Klasse von Fehler soll das Projekt
+    ueberall sonst ausschliessen.
+    """
+    load.lade_pokemon_dimension(conn, [_pokemon("garchomp")])
+    monkeypatch.setattr(pipeline, "attacken_ergaenzen", lambda *a, **k: 0)
+
+    # Die Quelle bietet zwei Tage an; einer davon laesst sich nicht laden.
+    abzug = champions.ChampionsAbzug(stand="2026-07-29")
+    abzug.saison = "M4"
+    abzug.abzuege = [_abzug(datum="2026-07-28")]
+    abzug.fehlversuche = ["Garchomp / 2026-07-29 / Doubles"]
+
+    @contextmanager
+    def _ohne_quelle():
+        yield None
+
+    monkeypatch.setattr(champions, "extrahiere", lambda *a, **k: abzug)
+    monkeypatch.setattr(champions, "sitzung", _ohne_quelle)
+
+    ergebnis = champions.laden(conn)
+    assert ergebnis["erfolgreich"], ergebnis.get("meldung")
+
+    befunde = conn.execute(
+        "SELECT * FROM DQ_Befund WHERE regel = 'Quellverfuegbarkeit'").fetchall()
+    assert befunde, (
+        "Ein nicht abrufbarer Tagesstand hinterlaesst keinen Qualitaetsbefund."
+    )
+    assert "2026-07-29" in befunde[0]["schluessel"]
+    assert befunde[0]["dimension"] == "Vollstaendigkeit"
+
+    # Und er muss im Ladeprotokoll als Verlust erscheinen, nicht nur im Bericht.
+    abgewiesen = conn.execute(
+        "SELECT zeilen_abgewiesen FROM ETL_Lauf ORDER BY lauf_id DESC LIMIT 1"
+    ).fetchone()[0]
+    assert abgewiesen >= 1
 
 
 # --------------------------------------------------------------------------
