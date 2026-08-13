@@ -84,7 +84,13 @@ jobs:
       - name: Qualitaetstor
         # Erst nach der Sicherung: ein Qualitaetsmangel darf nicht dazu fuehren,
         # dass ein unwiederbringlicher Tagesstand verloren geht.
-        run: python -m scripts.qualitaet_pruefen --mindestindex 90
+        #
+        # Das Tor bewertet die eigene Verarbeitung: ein von der Quelle
+        # angebotener, aber nicht geholter Tag faerbt den Lauf rot. Veroeffentlicht
+        # die Quelle selbst nichts mehr, erscheint das als Warnung am Lauf --
+        # ein fremder Ausfall ist nicht durch einen erneuten Lauf zu beheben und
+        # darf das Tor nicht dauerhaft schliessen.
+        run: python -m scripts.qualitaet_pruefen --mindestindex 90 --annotationen
 
       - name: Zusammenfassung im Lauf hinterlegen
         if: always()

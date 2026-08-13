@@ -97,7 +97,9 @@ jobs:
       - name: Datenqualitaet pruefen
         if: steps.etl.outputs.quelle == 'an'
         # Bricht ab, wenn der Qualitaetsindex unter den Schwellwert faellt.
-        run: python -m scripts.qualitaet_pruefen --mindestindex 90
+        # Fremde Umstaende -- etwa eine Quelle, die nichts Neues veroeffentlicht --
+        # erscheinen als Warnung, nicht als Fehler.
+        run: python -m scripts.qualitaet_pruefen --mindestindex 90 --annotationen
 
       - name: Oberflaechentests gegen das befuellte Warehouse
         # Erst hier laufen sie wirklich: ohne Datenbank ueberspringen sie sich

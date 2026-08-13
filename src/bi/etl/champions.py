@@ -75,7 +75,12 @@ class Tagesabzug:
 
 @dataclass
 class ChampionsAbzug:
-    """Ergebnis des Champions-Extrakts."""
+    """Ergebnis des Champions-Extrakts.
+
+    ``tage`` ist das **Angebot der Quelle** -- alle Tage, die ihr Verzeichnis
+    fuehrt, unabhaengig davon, wie viele davon abgeholt wurden. ``abzuege``
+    enthaelt dagegen nur die tatsaechlich geladenen Tagesstaende.
+    """
 
     saison: str = ""
     tage: list[str] = field(default_factory=list)
@@ -124,6 +129,9 @@ def extrahiere(s: requests.Session, bereits_archiviert: set[tuple[str, str, str]
     abzug = ChampionsAbzug(stand=index.get("generatedAt", ""))
     ordner = index.get("dailyDataFolders") or []
     if not ordner:
+        # Erreichbar, aber ohne Tagesstaende. Das ausdruecklich zu melden trennt
+        # den Fall von einem Netzfehler -- der wuerde als Ausnahme enden.
+        fortschritt(1.0, "Die Quelle fuehrt derzeit keine Tagesstaende.")
         return abzug
 
     # Ordner sind als 'M4/28_07_2026' notiert.
@@ -133,11 +141,21 @@ def extrahiere(s: requests.Session, bereits_archiviert: set[tuple[str, str, str]
         if datum:
             tagesstaende.append((saison, _datum_umformen(datum)))
     tagesstaende.sort(key=lambda t: t[1], reverse=True)
-    if max_tage:
-        tagesstaende = tagesstaende[:max_tage]
 
+    # ``tage`` beschreibt das Angebot der Quelle, nicht unseren Ausschnitt daraus:
+    # ``max_tage`` begrenzt allein, wie viel davon abgeholt wird. Die
+    # Qualitaetsregeln bewerten spaeter gegen dieses Angebot -- ein beschnittener
+    # Stand wuerde ihnen Tage als "nicht vorhanden" melden, die es sehr wohl gibt.
     abzug.saison = tagesstaende[0][0] if tagesstaende else ""
     abzug.tage = sorted({d for _, d in tagesstaende})
+    if not abzug.tage:
+        # Ordner vorhanden, aber keiner in der erwarteten Schreibweise
+        # 'Saison/Tag' -- ein Formatwechsel der Quelle, kein leeres Angebot.
+        fortschritt(1.0, "Kein Ordner der Quelle folgt der Form 'Saison/Tag'.")
+        return abzug
+
+    if max_tage:
+        tagesstaende = tagesstaende[:max_tage]
 
     # Alle benoetigten CSV-Pfade sammeln, unter Auslassung des Archivierten.
     auftraege: list[tuple[str, str, str, str, str]] = []
@@ -159,7 +177,11 @@ def extrahiere(s: requests.Session, bereits_archiviert: set[tuple[str, str, str]
                               csv_eintrag["path"]))
 
     if not auftraege:
-        fortschritt(1.0, "Alle verfuegbaren Tage sind bereits archiviert.")
+        # Den Umfang des Angebots mitnennen: ohne ihn ist diese Meldung nicht
+        # von einem geaenderten Quellformat zu unterscheiden, das schlicht keine
+        # Auftraege mehr erzeugt.
+        fortschritt(1.0, f"Alle {len(abzug.tage)} von der Quelle angebotenen Tage "
+                         f"(bis {abzug.tage[-1]}) sind bereits archiviert.")
         return abzug
 
     fortschritt(0.05, f"Lade {len(auftraege)} Tagesdateien ...")
@@ -670,6 +692,9 @@ def laden(conn: sqlite3.Connection, max_tage: int | None = None,
             with sitzung() as s:
                 abzug = extrahiere(s, archivierte_staende(conn), max_tage, fortschritt)
             saison = abzug.saison
+            # Festhalten, was die Quelle angeboten hat -- die Qualitaetsregeln
+            # bewerten daran, ob eine Luecke ein eigenes Versaeumnis ist.
+            load.quelle_stand_schreiben(conn, "Champions", abzug.tage, abzug.stand)
             if abzug.abzuege:
                 fortschritt(0.5, f"Archiviere {len(abzug.abzuege)} Tagesabzuege ...")
                 neu_archiviert = archiviere(conn, abzug.abzuege, lauf_id)
@@ -748,6 +773,7 @@ def laden(conn: sqlite3.Connection, max_tage: int | None = None,
             "erfolgreich": True, "lauf_id": lauf_id, "saison": saison,
             "tage": tage, "geladen": geladen, "abgewiesen": verworfen,
             "neu_archiviert": neu_archiviert,
+            "quelle_stand": load.quelle_stand_lesen(conn, "Champions"),
             "meldung": (f"Saison {saison}: {len(tage)} Tage von {tage[0]} bis {tage[-1]}, "
                         f"{geladen} Faktensaetze."),
         }

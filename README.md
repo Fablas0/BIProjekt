@@ -63,6 +63,7 @@ vier der sechs Pokémon nehme ich im Team-Preview mit?
 ┌──────────────┐        ┌──────────────┐
 │  ETL_Lauf    │        │  Analytics   │        Schicht 3: Metadaten
 │  DQ_Befund   │        │  KPI · OLAP  │        + Analyseschicht
+│  Quelle_Stand│        │              │        was die Quelle anbot
 └──────────────┘        └──────┬───────┘
                                ▼
                         ┌─────────────┐
@@ -328,6 +329,28 @@ protokolliert.
 Dimensionen Vollständigkeit, Konsistenz, Eindeutigkeit, Wertebereich und
 Aktualität. Der verdichtete **Qualitätsindex** dient als Qualitätstor in der CI.
 
+### Bewertet wird, was steuerbar ist
+
+Zwei Regeln — Lückenlosigkeit des Archivs und Aktualität — hingen ursprünglich am
+Kalender: jede Lücke galt als Mangel, und der jüngste geladene Tag wurde gegen
+*heute* gemessen. Beides bewertet in Wahrheit das Verhalten der Quelle. Als
+Champions ab dem 04.08.2026 keine neuen Tagesstände mehr veröffentlichte, fiel
+der Index deshalb dauerhaft auf 86,7 % und färbte jeden täglichen Lauf rot —
+ohne dass irgendein Lauf daran etwas hätte ändern können. Ein Alarm, der sich
+nicht abstellen lässt, wird überlesen; genau das entwertet ein Qualitätstor.
+
+Beide Regeln messen daher jetzt gegen das **Angebot der Quelle**: Jeder Tag, den
+Champions führt, muss archiviert und geladen sein. Was die Quelle nicht mehr
+führt, ist unwiederbringlich und wird ausgewiesen, aber nicht bewertet.
+Grundlage ist `Quelle_Stand` — jeder Lauf hält dort fest, welche Tage die Quelle
+angeboten hat. Ohne diesen Vergleichswert (etwa beim Aufbau allein aus dem
+Archiv) bleiben die Regeln stumm statt zu raten.
+
+Der Stillstand der Quelle verschwindet damit nicht aus dem Bericht, er wechselt
+nur die Rubrik: **Beobachtungen** stehen unter dem Regelwerk, gehen nicht in den
+Index ein und erscheinen in GitHub Actions als Warnung. Ein verpasster Tag, den
+die Quelle noch führt, reißt dagegen weiterhin zwei Regeln und damit das Tor.
+
 ### Befunde aus der Quellanalyse
 
 1. **Keine Nutzungsquote, nur ein Rang.** Geprüft über alle 236 Pokémon und alle
@@ -406,9 +429,15 @@ Codefehler.
 tägliche Rhythmus ist keine Kür, sondern Pflicht: die Quelle hält nur 14 Tage
 vor. Der Lauf liest das versionierte Dateiarchiv ein, holt den neuen Tag, schreibt
 das Archiv zurück ins Repository und prüft **erst danach** die Qualität — sonst
-könnte ein Qualitätsmangel einen unwiederbringlichen Tagesstand kosten. Hier
-führt ein Quellausfall bewusst zu einem roten Lauf: ein nicht abgeholter Tag ist
-nach der Vorhaltezeit endgültig verloren, das muss auffallen.
+könnte ein Qualitätsmangel einen unwiederbringlichen Tagesstand kosten.
+
+Rot wird der Lauf hier, wo etwas zu retten war und nicht gerettet wurde: ist die
+Quelle nicht erreichbar oder bietet sie einen Tag an, den der Lauf nicht geholt
+hat, muss das auffallen — nach der Vorhaltezeit ist der Tag endgültig verloren.
+Veröffentlicht die Quelle dagegen selbst nichts mehr, erscheint das als Warnung
+am Lauf. Diese Unterscheidung ist der Grund, warum jeder Lauf protokolliert,
+welche Tage die Quelle angeboten hat: „nichts Neues geladen“ und „das Angebot der
+Quelle nicht mehr lesbar“ sähen im Protokoll sonst gleich aus.
 
 ### Deployment
 

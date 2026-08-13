@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from .config import QUELLE_VORHALTUNG_TAGE
+from .etl.load import quelle_stand_lesen
 from .stats import MAX_SP_JE_WERT, SP_BUDGET
 
 
@@ -41,6 +42,18 @@ class Pruefergebnis:
 def _zaehle(conn: sqlite3.Connection, sql: str, *parameter) -> int:
     ergebnis = conn.execute(sql, parameter).fetchone()
     return int(ergebnis[0]) if ergebnis and ergebnis[0] is not None else 0
+
+
+def _angebot_der_quelle(conn: sqlite3.Connection) -> set[str] | None:
+    """Die Tage, die die Quelle beim letzten Zugriff gefuehrt hat.
+
+    ``None`` heisst "unbekannt": es liegt kein Quellstand vor, weil dieser
+    Bestand noch nie gegen die Quelle geladen wurde -- die Regeln bewerten dann
+    nicht. Eine *leere* Menge ist etwas anderes: die Quelle war erreichbar und
+    fuehrte nichts.
+    """
+    stand = quelle_stand_lesen(conn, "Champions")
+    return None if stand is None else set(stand["tage"])
 
 
 # --------------------------------------------------------------------------
@@ -143,11 +156,20 @@ def regel_rang_eindeutig(conn: sqlite3.Connection) -> Pruefergebnis:
 # --------------------------------------------------------------------------
 
 def regel_archiv_lueckenlos(conn: sqlite3.Connection) -> Pruefergebnis:
-    """Das Archiv soll eine lueckenlose Tagesfolge enthalten.
+    """Das Archiv soll jeden Tag enthalten, den die Quelle noch anbietet.
 
     Die Quelle haelt nur rund zwei Wochen vor. Ein ausgelassener Ladelauf
-    hinterlaesst deshalb eine dauerhafte Luecke, die sich nicht mehr schliessen
-    laesst -- das muss auffallen, solange sich noch etwas retten laesst.
+    hinterlaesst deshalb eine dauerhafte Luecke -- das muss auffallen, solange
+    sich noch etwas retten laesst.
+
+    Genau darauf ist die Regel begrenzt. Ein Tag, den die Quelle nicht mehr
+    fuehrt, ist unwiederbringlich verloren; ihn taeglich erneut zu melden macht
+    ihn nicht wieder abrufbar, faerbt aber jeden Lauf dauerhaft rot und
+    entwertet damit das Qualitaetstor. Solche Tage bleiben im Befundtext
+    sichtbar, ohne die Regel zu reissen. Gerissen wird sie fuer jeden Tag, den
+    die Quelle noch fuehrt und der im Archiv fehlt -- ob er zwischen zwei
+    archivierten Tagen liegt oder hinter dem juengsten, macht keinen
+    Unterschied: geholt haette der Ladelauf ihn so oder so muessen.
     """
     tage = [z[0] for z in conn.execute(
         "SELECT DISTINCT datum_iso FROM Archiv_Champions ORDER BY datum_iso")]
@@ -157,18 +179,50 @@ def regel_archiv_lueckenlos(conn: sqlite3.Connection) -> Pruefergebnis:
             "Weniger als zwei archivierte Tage -- keine Luecke moeglich.", 0,
         )
 
+    archiviert = set(tage)
     erster, letzter = date.fromisoformat(tage[0]), date.fromisoformat(tage[-1])
     erwartet = {(erster + timedelta(days=i)).isoformat()
                 for i in range((letzter - erster).days + 1)}
-    fehlend = sorted(erwartet - set(tage))
+
+    angebot = _angebot_der_quelle(conn)
+    if angebot is None:
+        # Ohne Quellzugriff ist nicht zu beantworten, was noch zu holen waere.
+        # Es zu raten -- etwa ueber die Vorhaltezeit -- hiesse, unwiederbringliche
+        # Tage als Versaeumnis auszuweisen. Ein Bestand allein aus dem Archiv wird
+        # deshalb nicht bewertet; :func:`beobachte_quellenlage` weist darauf hin.
+        fehlend = sorted(erwartet - archiviert)
+        return Pruefergebnis(
+            "Lueckenlosigkeit des Archivs", "Vollstaendigkeit", True,
+            f"{len(tage)} Tage von {tage[0]} bis {tage[-1]}, {len(fehlend)} fehlende "
+            f"({', '.join(fehlend[:5])}). Ohne Zugriff auf die Quelle ist nicht "
+            f"bewertbar, ob sie noch abrufbar waeren."
+            if fehlend else
+            f"{len(tage)} Tage von {tage[0]} bis {tage[-1]}, ohne Luecken.", 0,
+        )
+
+    # Holbar ist alles, was die Quelle fuehrt und uns fehlt -- gleich, ob es
+    # zwischen zwei archivierten Tagen liegt oder hinter dem juengsten. Beides
+    # ist derselbe Mangel: ein angebotener Tag, den der Ladelauf nicht geholt hat.
+    holbar = sorted(angebot - archiviert)
+    # Verloren sind Luecken der bisherigen Reihe, die die Quelle nicht mehr fuehrt.
+    verloren = sorted(erwartet - archiviert - angebot)
+
+    if holbar:
+        befund = (f"{len(holbar)} von der Quelle angebotene Tage fehlen im Archiv und "
+                  f"haetten geladen werden muessen: {', '.join(holbar[:5])}.")
+        if verloren:
+            befund += f" Weitere {len(verloren)} Tage sind endgueltig verloren."
+    elif verloren:
+        befund = (f"Alle {len(tage)} noch abrufbaren Tage sind archiviert. "
+                  f"{len(verloren)} frueher ausgefallene Tage "
+                  f"({', '.join(verloren[:5])}) fuehrt die Quelle nicht mehr; sie "
+                  f"bleiben endgueltig verloren.")
+    else:
+        befund = f"{len(tage)} Tage von {tage[0]} bis {tage[-1]}, ohne Luecken."
 
     return Pruefergebnis(
-        "Lueckenlosigkeit des Archivs", "Vollstaendigkeit", not fehlend,
-        f"{len(tage)} Tage von {tage[0]} bis {tage[-1]}, ohne Luecken."
-        if not fehlend else
-        f"{len(fehlend)} fehlende Tage, darunter {', '.join(fehlend[:5])}. "
-        "Diese Staende sind an der Quelle nicht mehr abrufbar.",
-        len(fehlend),
+        "Lueckenlosigkeit des Archivs", "Vollstaendigkeit", not holbar,
+        befund, len(holbar),
     )
 
 
@@ -350,22 +404,92 @@ def regel_merkmalsanteile(conn: sqlite3.Connection) -> Pruefergebnis:
 # --------------------------------------------------------------------------
 
 def regel_aktualitaet(conn: sqlite3.Connection) -> Pruefergebnis:
-    """Der juengste geladene Tag soll nicht aelter als drei Tage sein.
+    """Das Warehouse soll so aktuell sein wie die Quelle.
 
-    Die Quelle haelt nur rund zwei Wochen vor. Wer laenger nicht laedt, verliert
-    Tage endgueltig -- die Regel warnt, bevor das geschieht.
+    Gemessen wird gegen den juengsten Tag, den die Quelle **anbietet**, nicht
+    gegen das heutige Datum. Beides faellt nur auseinander, wenn die Quelle
+    selbst nicht liefert -- ein fremder Ausfall, den kein Ladelauf beheben kann.
+    Was diese Regel prueft, ist das Eigene: Haben wir jeden angebotenen Tag auch
+    geholt? Wie alt die Quelle insgesamt ist, meldet
+    :func:`beobachte_quellenlage`.
+
+    Ohne hinterlegten Quellstand -- etwa bei einem Aufbau allein aus dem Archiv
+    -- fehlt die Vergleichsgroesse; der Rueckstand wird dann nur benannt. Ein
+    *leerer* Stand dagegen heisst, dass wir das Angebot der Quelle nicht mehr
+    lesen koennen, und gilt als Mangel.
     """
     jueng = conn.execute("SELECT MAX(datum_iso) FROM Dim_Zeit").fetchone()[0]
     if not jueng:
         return Pruefergebnis("Aktualitaet der Bewegungsdaten", "Aktualitaet", False,
                              "Keine Bewegungsdaten geladen.", 1)
 
-    rueckstand = (date.today() - date.fromisoformat(jueng)).days
+    stand = quelle_stand_lesen(conn, "Champions")
+    if stand is None:
+        rueckstand = (date.today() - date.fromisoformat(jueng)).days
+        return Pruefergebnis(
+            "Aktualitaet der Bewegungsdaten", "Aktualitaet", True,
+            f"Juengster geladener Tag: {jueng} ({rueckstand} Tage alt). Ohne Zugriff auf "
+            f"die Quelle ist nicht bewertbar, ob es einen neueren Tag gaebe; die Quelle "
+            f"haelt {QUELLE_VORHALTUNG_TAGE} Tage vor.", 0,
+        )
+
+    if not stand["letzter_tag"]:
+        return Pruefergebnis(
+            "Aktualitaet der Bewegungsdaten", "Aktualitaet", False,
+            f"Die Quelle bot beim letzten Zugriff am {stand['abgerufen_am'][:10]} keinen "
+            f"einzigen Tag an -- vermutlich hat sich ihr Format geaendert. Juengster "
+            f"geladener Tag: {jueng}.", 1,
+        )
+
+    offen = [t for t in stand["tage"] if t > jueng]
     return Pruefergebnis(
-        "Aktualitaet der Bewegungsdaten", "Aktualitaet", rueckstand <= 3,
-        f"Juengster geladener Tag: {jueng} (Rueckstand {rueckstand} Tage). "
-        f"Die Quelle haelt {QUELLE_VORHALTUNG_TAGE} Tage vor.",
-        max(0, rueckstand - 3),
+        "Aktualitaet der Bewegungsdaten", "Aktualitaet", not offen,
+        f"Juengster geladener Tag: {jueng}; die Quelle bietet nichts Neueres an."
+        if not offen else
+        f"{len(offen)} von der Quelle angebotene Tage sind nicht geladen: "
+        f"{', '.join(offen[:5])}. Juengster geladener Tag: {jueng}.",
+        len(offen),
+    )
+
+
+def beobachte_quellenlage(conn: sqlite3.Connection) -> Pruefergebnis | None:
+    """Meldet, wenn die Quelle selbst seit Tagen nichts Neues veroeffentlicht.
+
+    Das ist kein Mangel **unserer** Verarbeitung und zaehlt deshalb nicht in den
+    Qualitaetsindex -- ein fremder Ausfall darf ein Qualitaetstor nicht dauerhaft
+    schliessen. Sichtbar bleiben muss er trotzdem: die Auswertungen altern mit
+    der Quelle, und ein Formatwechsel saehe zunaechst genauso aus.
+
+    Liefert ``None``, wenn es nichts zu berichten gibt.
+    """
+    stand = quelle_stand_lesen(conn, "Champions")
+    if stand is None:
+        # Ein Bestand allein aus dem Archiv -- etwa in der Cloud, die bei jedem
+        # Start neu aufbaut. Zwei Regeln koennen dann nicht greifen; das gehoert
+        # in den Bericht, sonst liest sich ihr Bestehen als Unbedenklichkeit.
+        if not _zaehle(conn, "SELECT COUNT(*) FROM Archiv_Champions"):
+            return None
+        return Pruefergebnis(
+            "Quellenlage", "Aktualitaet", False,
+            "Kein Zugriff auf die Quelle hinterlegt -- der Bestand stammt aus dem "
+            "Archiv. Lueckenlosigkeit und Aktualitaet sind daran nicht bewertbar.", 1)
+
+    zeitpunkt = stand["abgerufen_am"][:10]
+    if not stand["letzter_tag"]:
+        return Pruefergebnis(
+            "Quellenlage", "Aktualitaet", False,
+            f"Die Quelle bot beim Zugriff am {zeitpunkt} keinen Tagesstand an.", 1)
+
+    rueckstand = (date.today() - date.fromisoformat(stand["letzter_tag"])).days
+    if rueckstand <= 3:
+        return None
+
+    return Pruefergebnis(
+        "Quellenlage", "Aktualitaet", False,
+        f"Die Quelle fuehrt seit {stand['letzter_tag']} keinen neuen Tag mehr "
+        f"({rueckstand} Tage; Zugriff am {zeitpunkt}). Ein fremder Ausfall -- die "
+        f"Auswertungen altern mit, holbar ist nichts.",
+        rueckstand,
     )
 
 
@@ -423,6 +547,26 @@ def pruefe_alles(conn: sqlite3.Connection) -> list[Pruefergebnis]:
                 regel.__name__, "Konsistenz", False,
                 f"Die Pruefung konnte nicht ausgefuehrt werden: {fehler}", 1,
             ))
+    return ergebnisse
+
+
+def beobachte_alles(conn: sqlite3.Connection) -> list[Pruefergebnis]:
+    """Fuehrt die Beobachtungen aus -- Befunde ausserhalb des Qualitaetsindex.
+
+    Beobachtungen betreffen Umstaende, die das Ergebnis beeintraechtigen, aber
+    nicht in der eigenen Verarbeitung liegen. Sie gehoeren in den Bericht, nicht
+    in die Bewertung: sonst hinge der Index am Wohlverhalten Dritter.
+    """
+    ergebnisse: list[Pruefergebnis] = []
+    for beobachtung in (beobachte_quellenlage,):
+        try:
+            ergebnis = beobachtung(conn)
+        except Exception as fehler:  # noqa: BLE001
+            ergebnis = Pruefergebnis(
+                beobachtung.__name__, "Aktualitaet", False,
+                f"Die Beobachtung konnte nicht ausgefuehrt werden: {fehler}", 1)
+        if ergebnis is not None:
+            ergebnisse.append(ergebnis)
     return ergebnisse
 
 

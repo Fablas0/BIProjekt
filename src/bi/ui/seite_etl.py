@@ -261,6 +261,15 @@ def _zeige_qualitaet(conn) -> None:
             st.markdown(ampel(e.ampel, f"**{e.regel}** — {e.befund}"), unsafe_allow_html=True)
         st.markdown("")
 
+    # Beobachtungen betreffen fremde Umstaende und gehen nicht in den Index ein.
+    # Sie stehen deshalb neben den Regeln, nicht zwischen ihnen.
+    beobachtungen = quality.beobachte_alles(conn)
+    if beobachtungen:
+        st.markdown("**Beobachtungen (ausserhalb der Bewertung)**")
+        for b in beobachtungen:
+            st.markdown(ampel("gelb", f"**{b.regel}** — {b.befund}"), unsafe_allow_html=True)
+        st.markdown("")
+
     st.markdown("#### Befunde aus den Ladelaeufen")
     protokoll = pd.read_sql("""
         SELECT b.erfasst_am AS Zeitpunkt, l.quelle AS Quelle, b.regel AS Regel,

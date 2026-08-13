@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import gzip
 import json
+from datetime import date, timedelta
 
 import pytest
 
@@ -318,15 +319,144 @@ def test_import_aus_leerem_verzeichnis_bleibt_stabil(conn, tmp_path) -> None:
         "dateien": 0, "saetze": 0}
 
 
+def _vor_tagen(anzahl: int) -> str:
+    """Datum relativ zu heute -- der Rueckstand der Quelle laeuft mit der Uhr."""
+    return (date.today() - timedelta(days=anzahl)).isoformat()
+
+
 def test_archivluecke_wird_erkannt(conn) -> None:
-    """Ein ausgelassener Ladelauf hinterlaesst eine nicht schliessbare Luecke."""
+    """Ein Tag, den die Quelle noch anbietet, haette geladen werden muessen."""
     champions.archiviere(
         conn, [_abzug(datum="2026-07-20"), _abzug(datum="2026-07-23")], lauf_id=1)
+    load.quelle_stand_schreiben(
+        conn, "Champions", ["2026-07-20", "2026-07-21", "2026-07-22", "2026-07-23"])
 
     ergebnis = quality.regel_archiv_lueckenlos(conn)
     assert not ergebnis.bestanden
     assert "2026-07-21" in ergebnis.befund
     assert ergebnis.betroffen == 2
+
+
+def test_verlorene_archivluecke_reisst_die_regel_nicht(conn) -> None:
+    """Was die Quelle nicht mehr fuehrt, ist durch keinen Lauf mehr zu holen.
+
+    Diese Tage taeglich erneut als Mangel zu melden faerbt das Qualitaetstor
+    dauerhaft rot, ohne dass sich etwas daran tun liesse.
+    """
+    champions.archiviere(
+        conn, [_abzug(datum="2026-07-20"), _abzug(datum="2026-07-23")], lauf_id=1)
+    load.quelle_stand_schreiben(conn, "Champions", ["2026-07-20", "2026-07-23"])
+
+    ergebnis = quality.regel_archiv_lueckenlos(conn)
+    assert ergebnis.bestanden
+    assert ergebnis.betroffen == 0
+    assert "endgueltig verloren" in ergebnis.befund
+    assert "2026-07-21" in ergebnis.befund
+
+
+def test_nicht_geholter_neuester_tag_reisst_die_lueckenregel(conn) -> None:
+    """Ein verpasster Tag hinter dem juengsten ist derselbe Mangel wie eine Luecke.
+
+    Er faellt sonst nur der Aktualitaetsregel auf -- eine einzelne gerissene
+    Regel haelt den Qualitaetsindex aber ueber dem Schwellwert, und ausgerechnet
+    der teuerste Fall bliebe ungeahndet.
+    """
+    champions.archiviere(
+        conn, [_abzug(datum="2026-07-22"), _abzug(datum="2026-07-23")], lauf_id=1)
+    load.quelle_stand_schreiben(
+        conn, "Champions", ["2026-07-22", "2026-07-23", "2026-07-24"])
+
+    ergebnis = quality.regel_archiv_lueckenlos(conn)
+    assert not ergebnis.bestanden
+    assert "2026-07-24" in ergebnis.befund
+    assert ergebnis.betroffen == 1
+
+
+def test_archivluecke_ohne_quellzugriff_wird_nicht_bewertet(conn) -> None:
+    """Ohne Quellzugriff bleibt offen, ob eine Luecke noch zu schliessen waere.
+
+    Das zu raten hiesse, unwiederbringliche Tage als Versaeumnis auszuweisen.
+    Der Bericht benennt die Luecke, bewertet sie aber nicht.
+    """
+    champions.archiviere(
+        conn, [_abzug(datum="2026-07-20"), _abzug(datum="2026-07-23")], lauf_id=1)
+
+    ergebnis = quality.regel_archiv_lueckenlos(conn)
+    assert ergebnis.bestanden
+    assert "nicht bewertbar" in ergebnis.befund
+    assert [b.regel for b in quality.beobachte_alles(conn)] == ["Quellenlage"]
+
+
+# --------------------------------------------------------------------------
+# Quellstand: fremder Ausfall gegen eigenes Versaeumnis
+# --------------------------------------------------------------------------
+
+def test_quellstand_haelt_nur_den_letzten_zugriff(conn) -> None:
+    load.quelle_stand_schreiben(
+        conn, "Champions", ["2026-08-04", "2026-08-02"], "2026-08-13T05:00:00Z")
+    load.quelle_stand_schreiben(conn, "Champions", ["2026-08-05"])
+
+    stand = load.quelle_stand_lesen(conn, "Champions")
+    assert stand["letzter_tag"] == "2026-08-05"
+    assert stand["tage"] == ["2026-08-05"]
+    assert stand["tage_verfuegbar"] == 1
+    assert load.quelle_stand_lesen(conn, "PokeAPI") is None
+
+
+def test_aktualitaet_misst_gegen_das_angebot_der_quelle(conn) -> None:
+    """Veroeffentlicht die Quelle nichts Neues, hinkt der Ladelauf nicht hinterher."""
+    load.lade_zeit(conn, ["2026-08-04"])
+    load.quelle_stand_schreiben(conn, "Champions", ["2026-08-03", "2026-08-04"])
+
+    ergebnis = quality.regel_aktualitaet(conn)
+    assert ergebnis.bestanden
+    assert "nichts Neueres" in ergebnis.befund
+
+
+def test_aktualitaet_reisst_bei_nicht_geholtem_tag(conn) -> None:
+    """Ein angebotener, aber nicht geladener Tag ist unser Versaeumnis."""
+    load.lade_zeit(conn, ["2026-08-04"])
+    load.quelle_stand_schreiben(conn, "Champions", ["2026-08-04", "2026-08-05"])
+
+    ergebnis = quality.regel_aktualitaet(conn)
+    assert not ergebnis.bestanden
+    assert "2026-08-05" in ergebnis.befund
+    assert ergebnis.betroffen == 1
+
+
+def test_aktualitaet_reisst_bei_leerem_quellangebot(conn) -> None:
+    """Ein leeres Angebot deutet auf ein geaendertes Quellformat -- kein Grund zur Ruhe."""
+    load.lade_zeit(conn, ["2026-08-04"])
+    load.quelle_stand_schreiben(conn, "Champions", [])
+
+    assert not quality.regel_aktualitaet(conn).bestanden
+
+
+def test_aktualitaet_ohne_quellzugriff_benennt_nur_das_alter(conn) -> None:
+    """Ohne Vergleichsgroesse ist ein Rueckstand nicht als Mangel zuzurechnen."""
+    load.lade_zeit(conn, [_vor_tagen(9)])
+
+    ergebnis = quality.regel_aktualitaet(conn)
+    assert ergebnis.bestanden
+    assert "9 Tage alt" in ergebnis.befund
+
+
+def test_quellstillstand_wird_beobachtet_statt_bewertet(conn) -> None:
+    """Der Stillstand faellt auf, zaehlt aber nicht gegen den Qualitaetsindex."""
+    load.lade_zeit(conn, [_vor_tagen(9)])
+    load.quelle_stand_schreiben(conn, "Champions", [_vor_tagen(9)])
+
+    assert quality.regel_aktualitaet(conn).bestanden
+    beobachtungen = quality.beobachte_alles(conn)
+    assert [b.regel for b in beobachtungen] == ["Quellenlage"]
+    assert _vor_tagen(9) in beobachtungen[0].befund
+    assert all(b.regel != "Quellenlage" for b in quality.pruefe_alles(conn))
+
+
+def test_ohne_quellstillstand_keine_beobachtung(conn) -> None:
+    load.quelle_stand_schreiben(conn, "Champions", [_vor_tagen(1)])
+
+    assert quality.beobachte_alles(conn) == []
 
 
 # --------------------------------------------------------------------------
