@@ -97,7 +97,9 @@ jobs:
       - name: Datenqualitaet pruefen
         if: steps.etl.outputs.quelle == 'an'
         # Bricht ab, wenn der Qualitaetsindex unter den Schwellwert faellt.
-        run: python -m scripts.qualitaet_pruefen --mindestindex 90
+        # Massgeblich ist bi.quality.MINDESTINDEX -- dieselbe Zahl, an der die
+        # Oberflaeche die Kachel des Qualitaetsindex einfaerbt.
+        run: python -m scripts.qualitaet_pruefen
 
       - name: Oberflaechentests gegen das befuellte Warehouse
         # Erst hier laufen sie wirklich: ohne Datenbank ueberspringen sie sich

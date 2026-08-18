@@ -13,6 +13,7 @@ import streamlit as st
 
 from ..analytics import kpi, saison
 from ..etl.transform import faehigkeit_klasse
+from . import design
 from .komponenten import hinweis_leere_datenbank, hole_verbindung, kopfauswahl, seitenkopf
 
 # Archetypen des Formats. Die Erkennung erfolgt datengestuetzt ueber die im ETL
@@ -132,7 +133,8 @@ def zeichne() -> None:
             verbreitung.sort_values("anteil"), x="anteil", y="archetyp", orientation="h",
             labels={"anteil": "Praesenzindex", "archetyp": ""},
             title=f"Verbreitung der Archetypen am {monat}",
-            color="anteil", color_continuous_scale="Sunset", text_auto=".1f", height=380,
+            color="anteil", color_continuous_scale=design.VERLAUF_NEUTRAL,
+            text_auto=".1f", height=380,
         )
         abbildung.update_layout(coloraxis_showscale=False)
         st.plotly_chart(abbildung, width="stretch")

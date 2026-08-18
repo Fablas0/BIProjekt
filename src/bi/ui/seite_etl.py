@@ -13,7 +13,14 @@ from .. import quality, warehouse
 from ..analytics import kpi
 from ..config import QUELLE_VORHALTUNG_TAGE
 from ..etl import champions, pipeline
-from .komponenten import ampel, hole_verbindung, kennzahl_kachel, seitenkopf, zwischenspeicher_leeren
+from .komponenten import (
+    befundzeile,
+    hole_verbindung,
+    kennzahl_kachel,
+    seitenkopf,
+    tabelle,
+    zwischenspeicher_leeren,
+)
 
 
 def zeichne() -> None:
@@ -169,18 +176,20 @@ def _zeige_archiv(conn) -> None:
     spalten = st.columns(4)
     spalten[0].markdown(kennzahl_kachel(
         "Archivierte Tage", str(umfang["tage"]),
-        f"{umfang['erster_tag']} bis {umfang['letzter_tag']}", "#6390F0"),
+        f"{umfang['erster_tag']} bis {umfang['letzter_tag']}"),
         unsafe_allow_html=True)
     spalten[1].markdown(kennzahl_kachel(
         "Rohdatensaetze", f"{int(umfang['saetze']):,}".replace(",", "."),
-        "dauerhaft gesichert", "#7AC74C"), unsafe_allow_html=True)
+        "dauerhaft gesichert"), unsafe_allow_html=True)
     spalten[2].markdown(kennzahl_kachel(
-        "Saisons", str(umfang["saisons"]), "im Archiv vertreten", "#A33EA1"),
+        "Saisons", str(umfang["saisons"]), "im Archiv vertreten"),
         unsafe_allow_html=True)
+    # Erst dieser Ueberschuss belegt, dass das Archiv seinen Zweck erfuellt:
+    # er umfasst genau die Tage, die die Quelle bereits vergessen hat.
     spalten[3].markdown(kennzahl_kachel(
         "Ueber die Quelle hinaus", f"{ueberschuss} Tage",
         f"Quelle haelt {QUELLE_VORHALTUNG_TAGE} Tage vor",
-        "#2ecc71" if ueberschuss else "#95a5a6"), unsafe_allow_html=True)
+        "guenstig" if ueberschuss else "neutral"), unsafe_allow_html=True)
 
     if ueberschuss:
         st.success(
@@ -191,12 +200,12 @@ def _zeige_archiv(conn) -> None:
     st.markdown("#### Bestand je Tag und Format")
     bestand = pd.read_sql("""
         SELECT datum_iso AS Datum, saison AS Saison, kampfformat AS Format,
-               COUNT(*) AS "Pokemon", MIN(archiviert_am) AS "Archiviert am"
+               COUNT(*) AS "Erfasste Pokemon", MIN(archiviert_am) AS "Archiviert am"
         FROM Archiv_Champions
         GROUP BY datum_iso, saison, kampfformat
         ORDER BY datum_iso DESC, kampfformat
     """, conn)
-    st.dataframe(bestand, width="stretch", hide_index=True, height=340)
+    tabelle(bestand, height=340)
 
     st.markdown("#### Saisons")
     st.caption(
@@ -212,7 +221,7 @@ def _zeige_archiv(conn) -> None:
         FROM Dim_Saison s JOIN Dim_Quelle q ON q.quelle_sk = s.quelle_sk
         ORDER BY s.ist_aktuell DESC, s.beginn DESC
     """, conn)
-    st.dataframe(saisons, width="stretch", hide_index=True)
+    tabelle(saisons)
 
 
 def _zeige_qualitaet(conn) -> None:
@@ -222,12 +231,16 @@ def _zeige_qualitaet(conn) -> None:
 
     spalten = st.columns(4)
     bestanden = sum(1 for e in ergebnisse if e.bestanden)
+    # Gefaerbt wird an derselben Grenze, an der das Qualitaetstor der Workflows
+    # entscheidet. Eine gruene Kachel bedeutet damit: der naechtliche Lauf ginge
+    # mit diesem Bestand durch.
     spalten[0].markdown(kennzahl_kachel(
-        "Qualitaetsindex", f"{index} %", "bestandene Regeln",
-        "#2ecc71" if index >= 90 else "#f1c40f" if index >= 70 else "#e74c3c"),
+        "Qualitaetsindex", f"{index} %",
+        f"bestandene Regeln · Tor bei {quality.MINDESTINDEX:.0f} %",
+        "guenstig" if index >= quality.MINDESTINDEX else "gefahr"),
         unsafe_allow_html=True)
     spalten[1].markdown(kennzahl_kachel(
-        "Gepruefte Regeln", f"{bestanden} / {len(ergebnisse)}", "bestanden", "#6390F0"),
+        "Gepruefte Regeln", f"{bestanden} / {len(ergebnisse)}", "bestanden"),
         unsafe_allow_html=True)
 
     befunde = pd.read_sql(
@@ -235,12 +248,12 @@ def _zeige_qualitaet(conn) -> None:
     )["n"].iloc[0]
     spalten[2].markdown(kennzahl_kachel(
         "Offene Befunde", str(int(befunde)), "aus den Ladelaeufen",
-        "#e74c3c" if befunde else "#2ecc71"), unsafe_allow_html=True)
+        "gefahr" if befunde else "guenstig"), unsafe_allow_html=True)
 
     tage = kpi.verfuegbare_tage(conn)
     spalten[3].markdown(kennzahl_kachel(
         "Zeitreihe", f"{len(tage)} Tage",
-        f"{tage[0]} bis {tage[-1]}" if tage else "keine Daten", "#A33EA1"),
+        f"{tage[0]} bis {tage[-1]}" if tage else "keine Daten"),
         unsafe_allow_html=True)
 
     st.markdown("")
@@ -258,7 +271,8 @@ def _zeige_qualitaet(conn) -> None:
             continue
         st.markdown(f"**{dimension}**")
         for e in gruppe:
-            st.markdown(ampel(e.ampel, f"**{e.regel}** — {e.befund}"), unsafe_allow_html=True)
+            st.markdown(befundzeile(e.stufe, f"**{e.regel}** — {e.befund}"),
+                        unsafe_allow_html=True)
         st.markdown("")
 
     st.markdown("#### Befunde aus den Ladelaeufen")
@@ -278,7 +292,7 @@ def _zeige_qualitaet(conn) -> None:
             "korrigierbar, **Mangel 2. Klasse** ist erkennbar, erfordert aber eine "
             "fachliche Entscheidung."
         )
-        st.dataframe(protokoll, width="stretch", hide_index=True, height=340)
+        tabelle(protokoll, height=340)
 
 
 def _zeige_protokoll(conn) -> None:
@@ -301,7 +315,7 @@ def _zeige_protokoll(conn) -> None:
         "gelesenen, geladenen und abgewiesenen Zeilen macht Datenverluste im Prozess "
         "unmittelbar sichtbar."
     )
-    st.dataframe(laeufe, width="stretch", hide_index=True)
+    tabelle(laeufe)
 
     erfolgreich = laeufe[laeufe["Status"] == "erfolgreich"]
     if not erfolgreich.empty:
@@ -329,8 +343,7 @@ def _zeige_schichten(conn) -> None:
             continue
         with st.expander(f"{schicht} · {int(teil['Zeilen'].sum()):,} Zeilen".replace(",", "."),
                          expanded=schicht == "Fakt"):
-            st.dataframe(teil[["Tabelle", "Zeilen"]], width="stretch",
-                         hide_index=True)
+            tabelle(teil[["Tabelle", "Zeilen"]])
 
     st.markdown("#### Nachweis der Historisierung")
     st.caption(
@@ -345,7 +358,7 @@ def _zeige_schichten(conn) -> None:
                MIN(gueltig_ab) AS "Fruehester Beginn", MAX(gueltig_ab) AS "Letzter Beginn"
         FROM Dim_Pokemon GROUP BY ist_aktuell
     """, conn)
-    st.dataframe(historie, width="stretch", hide_index=True)
+    tabelle(historie)
 
     geaendert = pd.read_sql("""
         SELECT slug AS "Bezeichner", anzeigename AS "Pokemon", gueltig_ab AS "Gueltig ab",
@@ -363,4 +376,4 @@ def _zeige_schichten(conn) -> None:
             "aendert, erscheint hier die vollstaendige Aenderungshistorie."
         )
     else:
-        st.dataframe(geaendert, width="stretch", hide_index=True)
+        tabelle(geaendert)

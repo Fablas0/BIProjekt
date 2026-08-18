@@ -42,7 +42,13 @@ from typing import Any
 
 import requests
 
-from ..config import CHAMPIONS_BASIS, HTTP_THREADS, HTTP_TIMEOUT, KAMPFFORMATE
+from ..config import (
+    CHAMPIONS_BASIS,
+    HTTP_THREADS,
+    HTTP_TIMEOUT,
+    KAMPFFORMATE,
+    QUELLE_VORHALTUNG_TAGE,
+)
 from ..stats import STATUSWERTE, WESEN, alle_statuswerte, pruefe_statuspunkte, verteilung_kurzform
 from . import archivdatei
 from .extract import sitzung
@@ -662,6 +668,12 @@ def laden(conn: sqlite3.Connection, max_tage: int | None = None,
         kampfformat_karten = load.lade_alle_kampfformate(conn)
 
         neu_archiviert = 0
+        # Tagesstaende, die die Quelle angeboten hat, deren Abruf aber
+        # scheiterte. Sie werden weiter unten zu Qualitaetsbefunden -- ohne das
+        # verschwaende ein solcher Tag lautlos: der Lauf meldete Erfolg, das
+        # Archiv bliebe unvollstaendig, und aufgefallen waere es erst, wenn die
+        # Vorhaltezeit der Quelle den Tag laengst vergessen hat.
+        quell_fehlversuche: list[str] = []
         if aus_archiv:
             fortschritt(0.1, "Lese Rohdaten aus dem Archiv ...")
             abzuege = lies_aus_archiv(conn)
@@ -670,6 +682,7 @@ def laden(conn: sqlite3.Connection, max_tage: int | None = None,
             with sitzung() as s:
                 abzug = extrahiere(s, archivierte_staende(conn), max_tage, fortschritt)
             saison = abzug.saison
+            quell_fehlversuche = abzug.fehlversuche
             if abzug.abzuege:
                 fortschritt(0.5, f"Archiviere {len(abzug.abzuege)} Tagesabzuege ...")
                 neu_archiviert = archiviere(conn, abzug.abzuege, lauf_id)
@@ -686,6 +699,19 @@ def laden(conn: sqlite3.Connection, max_tage: int | None = None,
         saetze, befunde = transformiere(abzuege, set(pokemon_karte), basiswerte)
         if not saetze:
             raise ValueError("Kein einziger Champions-Satz konnte zugeordnet werden.")
+
+        # Ein angebotener, aber nicht abrufbarer Tag ist die teuerste Art von
+        # Fehler in diesem Projekt: er faellt erst auf, wenn er nicht mehr zu
+        # beheben ist. Der Befund macht ihn sofort sichtbar -- im Bericht, im
+        # Ladeprotokoll als abgewiesener Satz, und solange die Quelle den Tag
+        # noch vorhaelt, holt ihn der naechste Lauf von selbst nach.
+        for kennung in quell_fehlversuche:
+            befunde.append(Befund(
+                "Archiv_Champions", kennung, "Quellverfuegbarkeit",
+                "Der Tagesstand wurde von der Quelle angeboten, war aber nach "
+                "mehreren Versuchen nicht abrufbar. Er fehlt im Archiv und ist "
+                f"nur noch rund {QUELLE_VORHALTUNG_TAGE} Tage lang nachholbar.",
+                klasse="Mangel 2. Klasse", dimension="Vollstaendigkeit"))
 
         tage = sorted({s.datum_iso for s in saetze})
         zeit_karte = load.lade_zeit(conn, tage)

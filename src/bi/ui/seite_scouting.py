@@ -13,12 +13,14 @@ import streamlit as st
 
 from ..analytics import kpi, threat
 from ..config import TYP_DEUTSCH, sprite_url
+from . import design
 from .komponenten import (
     hinweis_leere_datenbank,
     hinweis_messniveau,
     hole_verbindung,
     kopfauswahl,
     seitenkopf,
+    tabelle,
     typ_abzeichen_paar,
 )
 
@@ -73,10 +75,9 @@ def zeichne() -> None:
     with reiter[3]:
         _zeige_bedrohungen(conn, team, monat, kampfformat)
     with reiter[4]:
-        st.dataframe(team.drop(columns=[s for s in ("usage_sk", "pokemon_sk", "zeit_sk",
-                                                    "regulation_sk", "skill_sk")
-                                        if s in team.columns]),
-                     width="stretch")
+        tabelle(team.drop(columns=[s for s in ("usage_sk", "pokemon_sk", "zeit_sk",
+                                               "regulation_sk", "skill_sk")
+                                   if s in team.columns]))
 
 
 # --------------------------------------------------------------------------
@@ -239,7 +240,7 @@ def _zeige_schwaechen(conn, team: pd.DataFrame, monat: str, kampfformat: str) ->
     abbildung = px.bar(
         anzeige[anzeige["risiko"] > 0].sort_values("risiko"),
         x="risiko", y="angriffstyp", orientation="h", color="risiko",
-        color_continuous_scale="Reds",
+        color_continuous_scale=design.VERLAUF_GEFAHR,
         labels={"risiko": "Risikowert", "angriffstyp": ""},
         title="Ungedeckte Schwaechen, gewichtet mit der Meta-Haeufigkeit",
         text_auto=".1f", height=420,
@@ -247,13 +248,13 @@ def _zeige_schwaechen(conn, team: pd.DataFrame, monat: str, kampfformat: str) ->
     abbildung.update_layout(coloraxis_showscale=False)
     st.plotly_chart(abbildung, width="stretch")
 
-    st.dataframe(
+    tabelle(
         anzeige.rename(columns={
             "angriffstyp": "Angriffstyp", "anfaellig": "Anfaellig",
             "resistent": "Resistent", "immun": "Immun",
             "schlimmster_faktor": "Hoechster Faktor", "meta_anteil": "Meta-Anteil (%)",
             "risiko": "Risiko", "bewertung": "Bewertung",
-        }), width="stretch", hide_index=True, height=420,
+        }), height=420,
     )
 
 
@@ -275,18 +276,17 @@ def _zeige_bedrohungen(conn, team: pd.DataFrame, monat: str, kampfformat: str) -
     for spalte, (_, zeile) in zip(spalten, bedrohungen.head(5).iterrows(), strict=False):
         with spalte:
             st.markdown(
-                f"<div style='text-align:center;padding:8px;border-radius:10px;"
-                f"background:rgba(231,76,60,0.10);'>"
+                "<div class='karte karte--gefahr'>"
                 f"<img src='{sprite_url(int(zeile['pokedex_id']))}' width='92'>"
                 f"<div style='font-weight:700;font-size:0.9rem;'>{zeile['anzeigename']}</div>"
                 f"<div style='font-size:0.76rem;opacity:0.75;'>Bedrohung "
                 f"{zeile['bedrohungswert']:.0f}</div>"
                 f"<div style='font-size:0.74rem;opacity:0.65;'>{zeile['beste_attacke']}</div>"
-                f"</div>", unsafe_allow_html=True,
+                "</div>", unsafe_allow_html=True,
             )
 
     st.markdown("")
-    st.dataframe(
+    tabelle(
         bedrohungen.rename(columns={
             "anzeigename": "Pokemon", "typ_kombination": "Typen",
             "rang": "Rang im Meta", "bedrohungswert": "Bedrohungswert",
@@ -294,7 +294,6 @@ def _zeige_bedrohungen(conn, team: pd.DataFrame, monat: str, kampfformat: str) -
             "gefaehrdet": "Betroffen",
         })[["Pokemon", "Typen", "Rang im Meta", "Bedrohungswert", "Gefaehrlichste Attacke",
             "Gefaehrdete Mitglieder", "Betroffen"]],
-        width="stretch", hide_index=True,
     )
 
     st.caption(

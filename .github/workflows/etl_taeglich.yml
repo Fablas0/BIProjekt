@@ -10,6 +10,13 @@ name: Taeglicher ETL-Lauf
 # Datenbank. Das Data Warehouse ist daraus jederzeit neu ableitbar, die
 # Rohnutzlast dagegen nicht wiederbeschaffbar. Gemessen fallen rund 0,3 MB je
 # Tag an (gzip-komprimiert), also etwa 110 MB im Jahr.
+#
+# ABSCHALTUNG: GitHub deaktiviert einen geplanten Workflow nach 60 Tagen ohne
+# Aktivitaet im Repository. Die Commits des Bots aus diesem Lauf zaehlen dabei
+# ausdruecklich nicht mit. Der Zeitplan ist derzeit bis zum **30.09.2026**
+# gesichert; bis dahin muss ein eigener Commit oder ein Start ueber
+# "Run workflow" erfolgt sein. Danach faellt der Lauf still aus -- und ein
+# nicht abgeholter Tag ist nach der Vorhaltezeit der Quelle verloren.
 on:
   schedule:
     - cron: "0 5 * * *"
@@ -84,7 +91,11 @@ jobs:
       - name: Qualitaetstor
         # Erst nach der Sicherung: ein Qualitaetsmangel darf nicht dazu fuehren,
         # dass ein unwiederbringlicher Tagesstand verloren geht.
-        run: python -m scripts.qualitaet_pruefen --mindestindex 90
+        #
+        # Ohne Angabe gilt bi.quality.MINDESTINDEX. Die Schwelle stand zuvor als
+        # Zahl in beiden Workflows und in der Oberflaeche -- drei Stellen, die
+        # auseinanderlaufen konnten.
+        run: python -m scripts.qualitaet_pruefen
 
       - name: Zusammenfassung im Lauf hinterlegen
         if: always()

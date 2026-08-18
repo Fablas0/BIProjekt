@@ -18,8 +18,13 @@ from .komponenten import (
     hole_verbindung,
     kennzahl_kachel,
     seitenkopf,
+    tabelle,
     typ_abzeichen_paar,
 )
+
+# Ab welchem Anteil geschlagener Gegnerauswahlen die Empfehlung als deutlich
+# vorne gilt. Darunter bleibt die Kachel neutral: knapp vorne ist kein Mangel.
+DEUTLICH_VORNE_AB = 60
 
 
 def zeichne() -> None:
@@ -213,22 +218,24 @@ def _zeige_empfehlung(beste: preview.Empfehlung, eigene: list[preview.Kaempfer],
 
     st.markdown("")
     kacheln = st.columns(4)
+    # Die Gesamtwertung ist die Zahl, um derentwillen diese Seite existiert --
+    # die einzige Kachel der Anwendung, die Gelb tragen darf.
     kacheln[0].markdown(kennzahl_kachel(
         "Gesamtwertung", f"{beste.gesamtwertung:+.2f}",
-        "Mittelwert und Risiko verrechnet", design.POKEMON_GELB), unsafe_allow_html=True)
+        "Mittelwert und Risiko verrechnet", "empfehlung"), unsafe_allow_html=True)
     kacheln[1].markdown(kennzahl_kachel(
         "Im Vorteil gegen", f"{beste.gewinnquote:.0f} %",
         f"der {gegnerauswahlen} gegnerischen Auswahlen",
-        design.GRUEN if beste.gewinnquote >= 60 else design.POKEMON_GOLD),
+        "guenstig" if beste.gewinnquote >= DEUTLICH_VORNE_AB else "neutral"),
         unsafe_allow_html=True)
     kacheln[2].markdown(kennzahl_kachel(
         "Schlechtester Fall", f"{beste.schlechtester_fall:+.2f}",
         "gegen die unguenstigste Auswahl",
-        design.POKEMON_ROT if beste.schlechtester_fall < 0 else design.GRUEN),
+        "gefahr" if beste.schlechtester_fall < 0 else "guenstig"),
         unsafe_allow_html=True)
     kacheln[3].markdown(kennzahl_kachel(
         "Bester Fall", f"{beste.bester_fall:+.2f}",
-        "gegen die guenstigste Auswahl", design.BLAU_HELL), unsafe_allow_html=True)
+        "gegen die guenstigste Auswahl"), unsafe_allow_html=True)
 
     if beste.schlechtester_fall < 0:
         st.warning(
@@ -251,7 +258,7 @@ def _zeige_begruendung(beste: preview.Empfehlung, eigene: list[preview.Kaempfer]
 
     abbildung = px.bar(
         beitraege, x="Beitrag", y="Pokemon", orientation="h",
-        color="Beitrag", color_continuous_scale=[design.POKEMON_ROT, "#8A8F98", design.GRUEN],
+        color="Beitrag", color_continuous_scale=design.VERLAUF_BILANZ,
         color_continuous_midpoint=0, text_auto="+.2f", height=300,
         title="Wer traegt die Auswahl, wer belastet sie?",
     )
@@ -267,20 +274,20 @@ def _zeige_begruendung(beste: preview.Empfehlung, eigene: list[preview.Kaempfer]
 
 def _zeige_alle(empfehlungen: list[preview.Empfehlung]) -> None:
     """Rangliste aller moeglichen eigenen Auswahlen."""
-    tabelle = preview.empfehlungen_als_tabelle(empfehlungen)
+    auswertung = preview.empfehlungen_als_tabelle(empfehlungen)
 
     abbildung = px.bar(
-        tabelle.head(15).sort_values("Gesamtwertung"),
+        auswertung.head(15).sort_values("Gesamtwertung"),
         x="Gesamtwertung", y="Auswahl", orientation="h",
-        color="Gesamtwertung", color_continuous_scale=[design.POKEMON_ROT, "#8A8F98", design.GRUEN],
+        color="Gesamtwertung", color_continuous_scale=design.VERLAUF_BILANZ,
         color_continuous_midpoint=0, text_auto="+.2f",
-        height=max(380, 26 * min(len(tabelle), 15)),
+        height=max(380, 26 * min(len(auswertung), 15)),
         title="Bewertung aller moeglichen Auswahlen",
     )
     abbildung.update_layout(coloraxis_showscale=False)
     st.plotly_chart(abbildung, width="stretch")
 
-    st.dataframe(tabelle, width="stretch", hide_index=True, height=420)
+    tabelle(auswertung, height=420)
 
     st.caption(
         "Die Gesamtwertung verrechnet den Mittelwert ueber alle gegnerischen Auswahlen "
@@ -303,7 +310,7 @@ def _zeige_gegnerauswahlen(paarungen: list[preview.Paarung],
 
     abbildung = px.bar(
         matrix, x="Punktzahl", y="Gegnerische Auswahl", orientation="h",
-        color="Punktzahl", color_continuous_scale=[design.POKEMON_ROT, "#8A8F98", design.GRUEN],
+        color="Punktzahl", color_continuous_scale=design.VERLAUF_BILANZ,
         color_continuous_midpoint=0, text_auto="+.2f",
         height=max(380, 26 * len(matrix)),
         title="Bewertung gegen jede moegliche gegnerische Auswahl",
@@ -322,7 +329,7 @@ def _zeige_gegnerauswahlen(paarungen: list[preview.Paarung],
     else:
         st.success("Diese Auswahl ist gegen jede gegnerische Aufstellung im Vorteil.")
 
-    st.dataframe(matrix, width="stretch", hide_index=True, height=360)
+    tabelle(matrix, height=360)
 
 
 def _zeige_einzelduelle(eigene: list[preview.Kaempfer],
@@ -333,7 +340,7 @@ def _zeige_einzelduelle(eigene: list[preview.Kaempfer],
     matrix = duelle.pivot(index="Eigenes Pokemon", columns="Gegner", values="Bewertung")
     abbildung = px.imshow(
         matrix, text_auto=".2f", aspect="auto",
-        color_continuous_scale=[design.POKEMON_ROT, "#8A8F98", design.GRUEN],
+        color_continuous_scale=design.VERLAUF_BILANZ,
         color_continuous_midpoint=0,
         labels={"color": "Bewertung"},
         title="Einzelduelle: eigenes Pokemon gegen gegnerisches",
@@ -346,7 +353,4 @@ def _zeige_einzelduelle(eigene: list[preview.Kaempfer],
         "verrechnet den ausgeuebten Druck, den erlittenen Druck und die Initiative."
     )
 
-    st.dataframe(
-        duelle.sort_values("Bewertung", ascending=False),
-        width="stretch", hide_index=True, height=360,
-    )
+    tabelle(duelle.sort_values("Bewertung", ascending=False), height=360)

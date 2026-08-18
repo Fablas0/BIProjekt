@@ -13,7 +13,24 @@ import plotly.express as px
 import streamlit as st
 
 from ..analytics import olap
-from .komponenten import hinweis_leere_datenbank, hole_verbindung, kennzahl_kachel, seitenkopf
+from . import design
+from .komponenten import (
+    hinweis_leere_datenbank,
+    hole_verbindung,
+    kennzahl_kachel,
+    seitenkopf,
+    tabelle,
+)
+
+
+def _verlauf(kennzahl: olap.Kennzahl) -> list:
+    """Farbverlauf passend zur Richtung der Kennzahl.
+
+    Die Richtung steht bereits an der Kennzahl (``kleiner_ist_besser``) und wird
+    hier nur uebersetzt. Zuvor trugen alle Auswertungen dieselbe Skala, sodass
+    ein guter Rang und eine hohe Anzahl gleich eingefaerbt waren.
+    """
+    return design.VERLAUF_RANG if kennzahl.kleiner_ist_besser else design.VERLAUF_NEUTRAL
 
 
 def _merkmal_optionen() -> dict[str, str]:
@@ -82,18 +99,20 @@ def zeichne() -> None:
     if ranggrenze < 250:
         teilwuerfel = teilwuerfel[teilwuerfel["rang"] <= ranggrenze]
 
+    # Die vier Kacheln beschreiben den Zuschnitt des Teilwuerfels. Keine von
+    # ihnen faellt ein Urteil -- sie bleiben deshalb allesamt neutral.
     eckwerte = olap.wuerfel_kennzahlen(teilwuerfel)
     spalten = st.columns(4)
     spalten[0].markdown(kennzahl_kachel("Faktensaetze", f"{eckwerte['zeilen']:,}".replace(",", "."),
-                                        "im aktuellen Teilwuerfel", "#6390F0"),
+                                        "im aktuellen Teilwuerfel"),
                         unsafe_allow_html=True)
     spalten[1].markdown(kennzahl_kachel("Pokemon", str(eckwerte["pokemon"]),
-                                        "unterschiedliche Auspraegungen", "#7AC74C"),
+                                        "unterschiedliche Auspraegungen"),
                         unsafe_allow_html=True)
     spalten[2].markdown(kennzahl_kachel("Tage", str(eckwerte["tage"]),
-                                        "Zeitdimension", "#EE8130"), unsafe_allow_html=True)
+                                        "Zeitdimension"), unsafe_allow_html=True)
     spalten[3].markdown(kennzahl_kachel("Bester Rang", str(eckwerte["bester_rang"]),
-                                        "im Teilwuerfel vertreten", "#A33EA1"),
+                                        "im Teilwuerfel vertreten"),
                         unsafe_allow_html=True)
 
     if teilwuerfel.empty:
@@ -186,13 +205,13 @@ def zeichne() -> None:
     kennzahl = olap.KENNZAHLEN[kennzahl_schluessel]
 
     if spalten_merkmal:
-        tabelle = olap.verdichte(teilwuerfel, zeilen_merkmal, kennzahl_schluessel,
-                                 spalten_merkmal)
-        if tabelle.empty:
+        verdichtet = olap.verdichte(teilwuerfel, zeilen_merkmal, kennzahl_schluessel,
+                                    spalten_merkmal)
+        if verdichtet.empty:
             st.warning("Die gewaehlte Kombination liefert keine Auswertung.")
             return
 
-        _kreuztabelle(tabelle, kennzahl_schluessel, kennzahl_beschriftung,
+        _kreuztabelle(verdichtet, kennzahl_schluessel, kennzahl_beschriftung,
                       aktuell, olap.ALLE_MERKMALE[spalten_merkmal])
         return
 
@@ -217,16 +236,16 @@ def _zeilenzahl(gesamt: int, schluessel: str) -> int | None:
     return None if gewaehlt.startswith("Alle") else stufen[beschriftungen.index(gewaehlt)]
 
 
-def _kreuztabelle(tabelle, kennzahl_schluessel: str, kennzahl_beschriftung: str,
+def _kreuztabelle(verdichtet, kennzahl_schluessel: str, kennzahl_beschriftung: str,
                   zeilen_merkmal: olap.Merkmal, spalten_merkmal: olap.Merkmal) -> None:
     """Zweiachsige Auswertung: Verlauf ueber die Zeit, sonst Kreuztabelle."""
     kennzahl = olap.KENNZAHLEN[kennzahl_schluessel]
 
     steuerung = st.columns([1, 3])
     with steuerung[0]:
-        anzahl = _zeilenzahl(len(tabelle), "kreuz")
+        anzahl = _zeilenzahl(len(verdichtet), "kreuz")
 
-    geordnet = olap.beste_auspraegungen(tabelle, kennzahl_schluessel)
+    geordnet = olap.beste_auspraegungen(verdichtet, kennzahl_schluessel)
     auswahl = geordnet if anzahl is None else geordnet.head(anzahl)
 
     # Auf einer Zeitachse ist der Verlauf die Frage, nicht der Einzelwert.
@@ -261,7 +280,8 @@ def _kreuztabelle(tabelle, kennzahl_schluessel: str, kennzahl_beschriftung: str,
         )
     else:
         abbildung = px.imshow(
-            auswahl, text_auto=".1f", aspect="auto", color_continuous_scale="Sunset",
+            auswahl, text_auto=".1f", aspect="auto",
+            color_continuous_scale=_verlauf(kennzahl),
             labels={"x": spalten_merkmal.bezeichnung, "y": zeilen_merkmal.bezeichnung,
                     "color": kennzahl_beschriftung},
             title=f"{kennzahl_beschriftung} nach {zeilen_merkmal.bezeichnung} und "
@@ -273,14 +293,15 @@ def _kreuztabelle(tabelle, kennzahl_schluessel: str, kennzahl_beschriftung: str,
     if anzahl is not None:
         gute_richtung = "niedrigsten" if kennzahl.kleiner_ist_besser else "hoechsten"
         st.caption(
-            f"Abgebildet sind {len(auswahl)} von {len(tabelle)} Auspraegungen -- "
+            f"Abgebildet sind {len(auswahl)} von {len(verdichtet)} Auspraegungen -- "
             f"jene mit dem {gute_richtung} Wert der Kennzahl *{kennzahl_beschriftung}*. "
             "Die Tabelle darunter zeigt den vollstaendigen Bestand."
         )
 
     st.markdown(f"**Vollstaendige Auswertung** — {len(geordnet)} Auspraegungen, "
                 "sortierbar durch Klick auf eine Spaltenueberschrift")
-    st.dataframe(geordnet, width="stretch", height=420)
+    # Der Index traegt hier die Zeilenachse der Kreuztabelle und bleibt sichtbar.
+    tabelle(geordnet, hide_index=False, height=420)
 
 
 def _rangliste(ergebnis, zeilen_schluessel: str, kennzahl: olap.Kennzahl,
@@ -300,7 +321,7 @@ def _rangliste(ergebnis, zeilen_schluessel: str, kennzahl: olap.Kennzahl,
         labels={"wert": kennzahl_beschriftung, zeilen_schluessel: ""},
         title=f"{kennzahl_beschriftung} nach {merkmal.bezeichnung}"
               + (" (kleiner ist besser)" if kennzahl.kleiner_ist_besser else ""),
-        color="wert", color_continuous_scale="Sunset", text_auto=".1f",
+        color="wert", color_continuous_scale=_verlauf(kennzahl), text_auto=".1f",
         height=max(400, 24 * len(auswahl)),
     )
     abbildung.update_layout(coloraxis_showscale=False)
@@ -313,8 +334,7 @@ def _rangliste(ergebnis, zeilen_schluessel: str, kennzahl: olap.Kennzahl,
                  "anteil_prozent": "Anteil (%)", "kumuliert_prozent": "Kumuliert (%)"}
     st.markdown(f"**Vollstaendige Auswertung** — {len(ergebnis)} Auspraegungen, "
                 "sortierbar durch Klick auf eine Spaltenueberschrift")
-    st.dataframe(ergebnis.rename(columns=umbenannt), width="stretch",
-                 hide_index=True, height=420)
+    tabelle(ergebnis.rename(columns=umbenannt), height=420)
 
     if not kennzahl.anteil_zulaessig:
         st.caption(
