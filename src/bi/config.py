@@ -53,6 +53,11 @@ META_RANGGRENZE = 50
 # Anteil, ab dem eine Attacke oder ein Item als Teil des Standard-Sets gilt.
 SET_SCHWELLE = 20.0
 
+# Signifikanzniveau der Hypothesenpruefung. 5 Prozent ist die Konvention der
+# empirischen Sozial- und Wirtschaftsforschung; der Wert steht hier sichtbar,
+# weil er eine Festlegung ist und keine Naturkonstante.
+ALPHA = 0.05
+
 # Vorhaltezeit der Quelle in Tagen. Alles darueber hinaus existiert nur noch im
 # eigenen Archiv.
 QUELLE_VORHALTUNG_TAGE = 14
