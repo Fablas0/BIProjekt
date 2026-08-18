@@ -25,13 +25,17 @@ from bi import warehouse  # noqa: E402
 from bi.analytics import kpi, saison  # noqa: E402
 from bi.config import QUELLE_VORHALTUNG_TAGE  # noqa: E402
 from bi.ui import (  # noqa: E402
+    anmeldung,
     design,
     komponenten,
     seite_cockpit,
     seite_etl,
+    seite_hypothesen,
     seite_olap,
+    seite_pc,
     seite_playbook,
     seite_preview,
+    seite_schaden,
     seite_scouting,
     seite_speedtiers,
     seite_teambuilder,
@@ -43,8 +47,11 @@ SEITEN = {
     "Gegner-Scouting": seite_scouting.zeichne,
     "Team-Builder": seite_teambuilder.zeichne,
     "Speed-Tiers": seite_speedtiers.zeichne,
+    "Schadensrechner": seite_schaden.zeichne,
+    "PC-System": seite_pc.zeichne,
     "OLAP-Explorer": seite_olap.zeichne,
     "Meta-Playbook": seite_playbook.zeichne,
+    "Hypothesen": seite_hypothesen.zeichne,
     "ETL & Datenqualitaet": seite_etl.zeichne,
 }
 
@@ -60,10 +67,15 @@ NAVIGATION: dict[str, list[tuple[str, str]]] = {
         ("Gegner-Scouting", "Womit ist bei diesem Gegner zu rechnen?"),
         ("Team-Builder", "Wo ist mein Team angreifbar?"),
         ("Speed-Tiers", "Wer handelt zuerst?"),
+        ("Schadensrechner", "Ueberlebt mein Pokemon diesen Treffer?"),
+    ],
+    "Eigener Bestand": [
+        ("PC-System", "Eigene Pokemon, Sets und Teams -- dauerhaft gespeichert"),
     ],
     "Vertiefung": [
         ("OLAP-Explorer", "Wuerfel frei navigieren: Slice, Dice, Drill-Down"),
         ("Meta-Playbook", "Verdichtete Handlungsempfehlungen"),
+        ("Hypothesen", "Vorab formulierte Aussagen, statistisch geprueft"),
     ],
     "Betrieb": [
         ("ETL & Datenqualitaet", "Ladelaeufe, Archiv und Qualitaetsbericht"),
@@ -108,6 +120,11 @@ def main() -> None:
 
         seite = _navigation()
         st.markdown("---")
+
+        nutzer = anmeldung.angemeldeter_nutzer(komponenten.hole_verbindung())
+        if nutzer:
+            anmeldung.seitenleiste(komponenten.hole_verbindung(), nutzer)
+            st.markdown("---")
 
         _saisonauswahl()
         _zeige_status()

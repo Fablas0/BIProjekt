@@ -16,6 +16,33 @@ PROJEKT_WURZEL = Path(__file__).resolve().parents[2]
 DATEN_VERZEICHNIS = Path(os.getenv("VGC_BI_DATA_DIR", PROJEKT_WURZEL / "data"))
 DWH_PFAD = Path(os.getenv("VGC_BI_DB", DATEN_VERZEICHNIS / "vgc_dwh.db"))
 
+# Eigene Daten -- Nutzerkonten, PC-System, Teams -- liegen in einer **eigenen**
+# Datei. Das Warehouse ist eine Ableitung und wird bei jedem Kaltstart aus dem
+# Archiv neu erzeugt; alles, was darin laege, waere danach fort. Eigene Daten
+# sind der umgekehrte Fall: von Hand erfasst, nirgends sonst vorhanden, nicht
+# wiederbeschaffbar.
+NUTZER_DB_PFAD = Path(os.getenv("VGC_BI_NUTZER_DB", DATEN_VERZEICHNIS / "vgc_nutzer.db"))
+
+# Aufwand der Passwortableitung (PBKDF2-HMAC-SHA256). Der Wert folgt der
+# Empfehlung des OWASP fuer dieses Verfahren. Er steht im Datensatz jedes
+# Kontos, damit er spaeter angehoben werden kann, ohne bestehende Konten zu
+# entwerten.
+PBKDF2_ITERATIONEN = int(os.getenv("VGC_BI_PBKDF2", "600000"))
+
+# Zugangscode fuer die Selbstregistrierung. Ist er gesetzt, kann ein Konto nur
+# anlegen, wer ihn kennt -- die Anwendung steht unter bi.fablas.org im offenen
+# Netz. Das erste Konto (die Einrichtung) ist davon ausgenommen.
+REGISTRIERUNGSCODE = os.getenv("VGC_BI_REGISTRIERUNGSCODE", "")
+
+# Anmeldung erforderlich? Im oeffentlichen Betrieb ja. Fuer die lokale
+# Entwicklung laesst sie sich abschalten, ohne den Quelltext zu aendern.
+ANMELDUNG_ERFORDERLICH = os.getenv("VGC_BI_ANMELDUNG", "1") not in ("0", "aus", "nein")
+
+# Sperre nach wiederholten Fehlversuchen: nach so vielen Fehlversuchen in
+# diesem Zeitfenster wird die Anmeldung voruebergehend verweigert.
+ANMELDUNG_MAX_FEHLVERSUCHE = int(os.getenv("VGC_BI_MAX_FEHLVERSUCHE", "8"))
+ANMELDUNG_SPERRE_MINUTEN = int(os.getenv("VGC_BI_SPERRE_MINUTEN", "15"))
+
 # Das Rohdatenarchiv liegt bewusst NEBEN dem Datenverzeichnis, nicht darin:
 # ``data/`` ist von der Versionsverwaltung ausgeschlossen, und git steigt in ein
 # ausgeschlossenes Verzeichnis gar nicht erst hinab -- eine Wiedereinschluss-Regel

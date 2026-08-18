@@ -17,6 +17,11 @@ from pathlib import Path
 
 import pytest
 
+# Die Oberflaechentests pruefen die Fachseiten, nicht die Anmeldemaske; die
+# Maske hat eigene Tests auf der Datenschicht (tests/test_nutzerdaten.py).
+# Muss vor dem ersten Import von bi.config gesetzt sein.
+os.environ.setdefault("VGC_BI_ANMELDUNG", "0")
+
 WURZEL = Path(__file__).resolve().parents[1]
 DWH = Path(os.getenv("VGC_BI_DB", WURZEL / "data" / "vgc_dwh.db"))
 
@@ -63,8 +68,11 @@ SEITEN = [
     "Gegner-Scouting",
     "Team-Builder",
     "Speed-Tiers",
+    "Schadensrechner",
+    "PC-System",
     "OLAP-Explorer",
     "Meta-Playbook",
+    "Hypothesen",
     "ETL & Datenqualitaet",
 ]
 
