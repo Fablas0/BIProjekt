@@ -72,6 +72,7 @@ SEITEN = [
     "PC-System",
     "OLAP-Explorer",
     "Meta-Playbook",
+    "Spielformen",
     "Hypothesen",
     "ETL & Datenqualitaet",
 ]

@@ -79,6 +79,29 @@ CREATE TABLE IF NOT EXISTS Archiv_Champions (
 
 CREATE INDEX IF NOT EXISTS ix_archiv_champ ON Archiv_Champions (saison, datum_iso);
 
+-- Rohdatenarchive der weiteren Spielformen. Gleiches Prinzip wie beim
+-- Champions-Archiv: die Rohnutzlast eines Standes wird unveraendert gesichert
+-- und nie bereinigt. Die Quellen vergessen unterschiedlich schnell --
+-- pvpoke ueberschreibt seine Ranglisten bei jeder Balance-Anpassung ohne
+-- Historie, Turnierdaten bleiben zwar abrufbar, aber nur einzeln.
+CREATE TABLE IF NOT EXISTS Archiv_TCG (
+    stand_iso     TEXT NOT NULL,            -- Abzugstag
+    turnier_id    TEXT NOT NULL,
+    nutzlast      TEXT NOT NULL,            -- unveraenderte JSON-Antwort
+    archiviert_am TEXT NOT NULL,
+    lauf_id       INTEGER NOT NULL,
+    PRIMARY KEY (turnier_id)
+);
+
+CREATE TABLE IF NOT EXISTS Archiv_GO (
+    stand_iso     TEXT NOT NULL,            -- Abzugstag
+    liga          TEXT NOT NULL,            -- 'great' | 'ultra' | 'master'
+    nutzlast      TEXT NOT NULL,            -- unveraenderte JSON-Rangliste
+    archiviert_am TEXT NOT NULL,
+    lauf_id       INTEGER NOT NULL,
+    PRIMARY KEY (stand_iso, liga)
+);
+
 -- =====================================================================
 -- SCHICHT 2: CORE DATA WAREHOUSE -- DIMENSIONEN
 -- =====================================================================
@@ -233,6 +256,39 @@ CREATE TABLE IF NOT EXISTS Dim_Faehigkeit (
     generation     INTEGER
 );
 
+-- Markt-Dimension (Laender) mit Konsolidierungspfad Region -> Land.
+--
+-- Grundlage des Laendervergleichs im Sammelkartenspiel: die Turnierdaten
+-- fuehren zu jedem Spieler das Land. Die Region ist als Hierarchieebene
+-- angereichert, weil viele Laender einzeln zu duenn besetzt sind, um eine
+-- Verteilung zu tragen -- die Pruefverfahren brauchen Gruppen ab einer
+-- Mindestgroesse.
+CREATE TABLE IF NOT EXISTS Dim_Markt (
+    markt_sk   INTEGER PRIMARY KEY AUTOINCREMENT,
+    iso2       TEXT NOT NULL UNIQUE,        -- 'DE', 'JP', ...
+    name       TEXT NOT NULL,
+    region     TEXT NOT NULL                -- Hierarchieebene 1: 'Europa', ...
+);
+
+-- Liga-Dimension von Pokemon GO. Die Liga ist dort, was das Kampfformat bei
+-- Champions ist: dieselben Pokemon, andere Regeln, andere Meta.
+CREATE TABLE IF NOT EXISTS Dim_Liga (
+    liga_sk    INTEGER PRIMARY KEY AUTOINCREMENT,
+    schluessel TEXT NOT NULL UNIQUE,        -- 'great' | 'ultra' | 'master'
+    bezeichnung TEXT NOT NULL,
+    wp_grenze  INTEGER                      -- Wettkampfpunkte-Obergrenze, NULL = offen
+);
+
+-- Deck-Archetypen des Sammelkartenspiels. Das Sammelkartenspiel kennt keine
+-- einzelnen Pokemon als Meta-Einheit, sondern Decks; das Leit-Pokemon stellt
+-- die Bruecke zur konformen Pokemon-Dimension her, wo eine Aufloesung gelingt.
+CREATE TABLE IF NOT EXISTS Dim_TCG_Deck (
+    deck_sk      INTEGER PRIMARY KEY AUTOINCREMENT,
+    schluessel   TEXT NOT NULL UNIQUE,      -- normalisierter Archetypname
+    anzeigename  TEXT NOT NULL,
+    leit_slug    TEXT                       -- Slug des Leit-Pokemon, wenn aufloesbar
+);
+
 -- =====================================================================
 -- SCHICHT 2: CORE DATA WAREHOUSE -- FAKTEN
 -- =====================================================================
@@ -300,6 +356,46 @@ CREATE TABLE IF NOT EXISTS Fact_Champions_Merkmal (
 
 CREATE INDEX IF NOT EXISTS ix_fact_champ_merkmal
     ON Fact_Champions_Merkmal (saison_sk, kampfformat_sk, kategorie, pokemon_sk);
+
+-- Meta des Sammelkartenspiels.
+-- Granularitaet: Deck-Archetyp x Markt x Tag (Turnierstand).
+--
+-- Anders als Champions liefert diese Quelle **kardinale** Kennzahlen: gezaehlt
+-- werden Spieler. Summen und Anteile sind hier zulaessig -- das Messniveau
+-- steht an der Quelle (Dim_Quelle.messniveau_nutzung) und nicht im Code.
+CREATE TABLE IF NOT EXISTS Fact_TCG_Meta (
+    deck_sk      INTEGER NOT NULL REFERENCES Dim_TCG_Deck (deck_sk),
+    markt_sk     INTEGER NOT NULL REFERENCES Dim_Markt (markt_sk),
+    zeit_sk      INTEGER NOT NULL REFERENCES Dim_Zeit (zeit_sk),
+    quelle_sk    INTEGER NOT NULL REFERENCES Dim_Quelle (quelle_sk),
+    spieler      INTEGER NOT NULL,          -- Kennzahl: Spieler mit diesem Deck
+    top8         INTEGER NOT NULL DEFAULT 0,-- davon in den besten acht
+    etl_lauf_id  INTEGER NOT NULL,
+    PRIMARY KEY (deck_sk, markt_sk, zeit_sk)
+);
+
+CREATE INDEX IF NOT EXISTS ix_fact_tcg ON Fact_TCG_Meta (zeit_sk, markt_sk);
+
+-- PvP-Meta von Pokemon GO.
+-- Granularitaet: Pokemon x Liga x Tag (Stand der Rangliste).
+--
+-- Die Quelle bewertet jedes Pokemon mit einer Punktzahl von 0 bis 100 --
+-- ebenfalls kardinal, im ausdruecklichen Gegensatz zum Rang von Champions.
+-- Der Rang ist hier eine abgeleitete Groesse und als solche gekennzeichnet.
+CREATE TABLE IF NOT EXISTS Fact_GO_Meta (
+    pokemon_sk   INTEGER REFERENCES Dim_Pokemon (pokemon_sk),  -- NULL: nicht aufloesbar
+    quell_id     TEXT    NOT NULL,          -- Bezeichner der Quelle, z.B. 'azumarill'
+    liga_sk      INTEGER NOT NULL REFERENCES Dim_Liga (liga_sk),
+    zeit_sk      INTEGER NOT NULL REFERENCES Dim_Zeit (zeit_sk),
+    quelle_sk    INTEGER NOT NULL REFERENCES Dim_Quelle (quelle_sk),
+    score        REAL    NOT NULL,          -- Kennzahl (kardinal, 0-100)
+    rang         INTEGER NOT NULL,          -- abgeleitet aus dem Score
+    ist_schatten INTEGER NOT NULL DEFAULT 0,
+    etl_lauf_id  INTEGER NOT NULL,
+    PRIMARY KEY (quell_id, liga_sk, zeit_sk)
+);
+
+CREATE INDEX IF NOT EXISTS ix_fact_go ON Fact_GO_Meta (liga_sk, zeit_sk, rang);
 
 -- =====================================================================
 -- SCHICHT 3: METADATEN
@@ -404,6 +500,31 @@ JOIN Dim_Kampfformat k ON k.kampfformat_sk = m.kampfformat_sk
 LEFT JOIN Dim_Attacke    a  ON a.attacke_sk    = m.attacke_sk
 LEFT JOIN Dim_Item       i  ON i.item_sk       = m.item_sk
 LEFT JOIN Dim_Faehigkeit fa ON fa.faehigkeit_sk = m.faehigkeit_sk;
+
+DROP VIEW IF EXISTS V_TCG_Meta;
+CREATE VIEW V_TCG_Meta AS
+SELECT
+    f.deck_sk, f.markt_sk, f.zeit_sk,
+    d.schluessel AS deck, d.anzeigename AS deck_name, d.leit_slug,
+    m.iso2, m.name AS markt, m.region,
+    z.datum_iso, z.monat_iso, z.jahr,
+    f.spieler, f.top8
+FROM Fact_TCG_Meta f
+JOIN Dim_TCG_Deck d ON d.deck_sk = f.deck_sk
+JOIN Dim_Markt    m ON m.markt_sk = f.markt_sk
+JOIN Dim_Zeit     z ON z.zeit_sk = f.zeit_sk;
+
+DROP VIEW IF EXISTS V_GO_Meta;
+CREATE VIEW V_GO_Meta AS
+SELECT
+    f.quell_id, f.liga_sk, f.zeit_sk, f.score, f.rang, f.ist_schatten,
+    l.schluessel AS liga, l.bezeichnung AS liga_name, l.wp_grenze,
+    z.datum_iso,
+    p.slug, p.anzeigename, p.typ1, p.typ2, p.generation, p.pokedex_id
+FROM Fact_GO_Meta f
+JOIN Dim_Liga l ON l.liga_sk = f.liga_sk
+JOIN Dim_Zeit z ON z.zeit_sk = f.zeit_sk
+LEFT JOIN Dim_Pokemon p ON p.pokemon_sk = f.pokemon_sk;
 
 DROP VIEW IF EXISTS V_Merkmal_Aktuell;
 CREATE VIEW V_Merkmal_Aktuell AS
@@ -542,9 +663,11 @@ def zuruecksetzen(conn: sqlite3.Connection, nur_fakten: bool = False,
     einmal verworfene Tage sind endgueltig verloren und nicht nachladbar.
     Das Verwerfen muss deshalb ausdruecklich verlangt werden.
     """
-    fakten = ["Fact_Champions_Usage", "Fact_Champions_Merkmal"]
+    fakten = ["Fact_Champions_Usage", "Fact_Champions_Merkmal",
+              "Fact_TCG_Meta", "Fact_GO_Meta"]
     stamm = ["Dim_Pokemon", "Dim_Zeit", "Dim_Attacke", "Dim_Item", "Dim_Faehigkeit",
-             "Dim_Saison", "Dim_Kampfformat", "Dim_Quelle"]
+             "Dim_Saison", "Dim_Kampfformat", "Dim_Quelle",
+             "Dim_Markt", "Dim_Liga", "Dim_TCG_Deck"]
     meta = ["Stage_Pokeapi", "DQ_Befund", "ETL_Lauf"]
 
     conn.execute("PRAGMA foreign_keys = OFF")
@@ -552,6 +675,8 @@ def zuruecksetzen(conn: sqlite3.Connection, nur_fakten: bool = False,
         conn.execute(f"DELETE FROM {tab}")  # noqa: S608
     if archiv_verwerfen:
         conn.execute("DELETE FROM Archiv_Champions")
+        conn.execute("DELETE FROM Archiv_TCG")
+        conn.execute("DELETE FROM Archiv_GO")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
 

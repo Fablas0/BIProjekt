@@ -313,6 +313,57 @@ def regel_faehigkeitsabdeckung(conn: sqlite3.Connection) -> Pruefergebnis:
         "nach ihrer Wirkungsklasse auswertbar")
 
 
+def regel_go_wertebereich(conn: sqlite3.Connection) -> Pruefergebnis:
+    """GO-Scores muessen im dokumentierten Bereich von 0 bis 100 liegen."""
+    gesamt = _zaehle(conn, "SELECT COUNT(*) FROM Fact_GO_Meta")
+    if gesamt == 0:
+        return Pruefergebnis("Wertebereich der GO-Scores", "Wertebereich", True,
+                             "Keine GO-Daten geladen.", 0)
+    ausserhalb = _zaehle(
+        conn, "SELECT COUNT(*) FROM Fact_GO_Meta WHERE score < 0 OR score > 100")
+    return Pruefergebnis(
+        "Wertebereich der GO-Scores", "Wertebereich", ausserhalb == 0,
+        "Alle GO-Scores liegen zwischen 0 und 100."
+        if ausserhalb == 0 else f"{ausserhalb} von {gesamt} Scores ausserhalb von 0-100.",
+        ausserhalb)
+
+
+def regel_go_aufloesungsquote(conn: sqlite3.Connection) -> Pruefergebnis:
+    """GO-Bezeichner sollen auf die konforme Pokemon-Dimension zeigen.
+
+    Ohne die Verknuepfung traegt der Satz nur innerhalb von GO; die
+    spieluebergreifenden Auswertungen (H13) sehen ihn nicht.
+    """
+    gesamt = _zaehle(conn, "SELECT COUNT(*) FROM Fact_GO_Meta WHERE ist_schatten = 0")
+    if gesamt == 0:
+        return Pruefergebnis("Aufloesung der GO-Bezeichner", "Konsistenz", True,
+                             "Keine GO-Daten geladen.", 0)
+    ohne = _zaehle(conn, """
+        SELECT COUNT(*) FROM Fact_GO_Meta
+        WHERE ist_schatten = 0 AND pokemon_sk IS NULL
+    """)
+    quote = 100 * (gesamt - ohne) / gesamt
+    return Pruefergebnis(
+        "Aufloesung der GO-Bezeichner", "Konsistenz", quote >= 90.0,
+        f"{quote:.1f}% der GO-Saetze sind mit der konformen Pokemon-Dimension "
+        "verknuepft.", ohne)
+
+
+def regel_tcg_plausibilitaet(conn: sqlite3.Connection) -> Pruefergebnis:
+    """Im TCG-Fakt darf die Top-8-Zahl die Spielerzahl nicht uebersteigen."""
+    gesamt = _zaehle(conn, "SELECT COUNT(*) FROM Fact_TCG_Meta")
+    if gesamt == 0:
+        return Pruefergebnis("Plausibilitaet der TCG-Zaehlung", "Konsistenz", True,
+                             "Keine TCG-Daten geladen.", 0)
+    verletzt = _zaehle(
+        conn, "SELECT COUNT(*) FROM Fact_TCG_Meta WHERE top8 > spieler OR spieler < 1")
+    return Pruefergebnis(
+        "Plausibilitaet der TCG-Zaehlung", "Konsistenz", verletzt == 0,
+        "Alle TCG-Zaehlungen sind in sich stimmig."
+        if verletzt == 0 else f"{verletzt} Saetze mit top8 > spieler oder spieler < 1.",
+        verletzt)
+
+
 # --------------------------------------------------------------------------
 # Wertebereich
 # --------------------------------------------------------------------------
@@ -444,6 +495,9 @@ ALLE_REGELN = (
     regel_attackenabdeckung,
     regel_itemabdeckung,
     regel_faehigkeitsabdeckung,
+    regel_go_wertebereich,
+    regel_go_aufloesungsquote,
+    regel_tcg_plausibilitaet,
     regel_statuspunkte_budget,
     regel_rangperzentil_wertebereich,
     regel_merkmalsanteile,

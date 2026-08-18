@@ -400,6 +400,83 @@ def _pruefe_wochenende(conn: sqlite3.Connection) -> Pruefgroesse:
     return mann_whitney(wochenende, woche)
 
 
+def _pruefe_laender(conn: sqlite3.Connection) -> Pruefgroesse:
+    """Spielen die Regionen im Sammelkartenspiel verschiedene Decks?
+
+    Kreuztabelle aus Region und Deck-Archetyp, gezaehlt in Spielern. Die
+    Kennzahl ist kardinal -- die Quelle zaehlt Personen, keine Raenge -- und
+    beide Merkmale sind nominal: der Chi-Quadrat-Unabhaengigkeitstest passt.
+
+    Zwei Zuschnitte halten die Approximation belastbar: gruppiert wird nach
+    **Region** statt nach Land (einzelne Laender sind zu duenn besetzt), und
+    betrachtet werden nur die zehn meistgespielten Archetypen; alles Weitere
+    faellt in eine Restklasse, statt verworfen zu werden.
+    """
+    df = pd.read_sql("""
+        SELECT region, deck_name, SUM(spieler) AS spieler
+        FROM V_TCG_Meta GROUP BY region, deck_name
+    """, conn)
+    if df.empty:
+        raise DatenbasisFehlt("Keine TCG-Turnierdaten geladen. Die Strecke braucht "
+                              "einen API-Schluessel (VGC_BI_TCG_SCHLUESSEL).")
+
+    haeufigste = (df.groupby("deck_name")["spieler"].sum()
+                  .nlargest(10).index)
+    df["klasse"] = df["deck_name"].where(df["deck_name"].isin(haeufigste), "Uebrige Decks")
+    kreuz = df.pivot_table(index="region", columns="klasse", values="spieler",
+                           aggfunc="sum", fill_value=0)
+    kreuz = kreuz.loc[kreuz.sum(axis=1) >= 30]
+    if len(kreuz) < 2:
+        raise DatenbasisFehlt("Weniger als zwei ausreichend besetzte Regionen.")
+    return chi_quadrat_unabhaengigkeit(kreuz.values.tolist())
+
+
+def _pruefe_go_ligen(conn: sqlite3.Connection) -> Pruefgroesse:
+    """Ist die GO-Meta zwischen Super- und Meisterliga dieselbe?
+
+    Dieselben Pokemon, andere Wettkampfpunkte-Grenze: die Superliga deckelt
+    bei 1500, die Meisterliga ist offen. Verglichen werden die Scores der in
+    beiden Ligen gefuehrten Pokemon per Rangkorrelation -- die Scores sind
+    zwar kardinal, aber zwischen zwei verschieden kalibrierten Ranglisten ist
+    nur die Reihenfolge vergleichbar, nicht die Zahl.
+    """
+    df = pd.read_sql("""
+        SELECT g.quell_id, g.score AS score_great, m.score AS score_master
+        FROM V_GO_Meta g
+        JOIN V_GO_Meta m ON m.quell_id = g.quell_id AND m.zeit_sk = g.zeit_sk
+        WHERE g.liga = 'great' AND m.liga = 'master'
+          AND g.zeit_sk = (SELECT MAX(zeit_sk) FROM Fact_GO_Meta)
+    """, conn)
+    if len(df) < 20:
+        raise DatenbasisFehlt(
+            f"Nur {len(df)} Pokemon in beiden GO-Ligen gefuehrt (mindestens 20).")
+    return spearman(df["score_great"].tolist(), df["score_master"].tolist())
+
+
+def _pruefe_spieluebergreifend(conn: sqlite3.Connection) -> Pruefgroesse:
+    """Ist ein starkes VGC-Pokemon auch in Pokemon GO stark?
+
+    Die Bruecke ist die konforme Pokemon-Dimension: beide Fakten zeigen ueber
+    den Slug auf dieselben Pokemon. Verglichen wird der Champions-Rang mit dem
+    GO-Score der Meisterliga -- sie laesst als einzige Liga alle Pokemon ohne
+    Wertedeckel zu und ist damit die fairste Gegenseite.
+
+    Ein kleiner Rang ist der bessere, ein grosser Score der bessere: ein
+    **negativer** Koeffizient bedeutet also, dass Staerke sich uebertraegt.
+    """
+    df = pd.read_sql(saison.anwenden("""
+        SELECT u.rang, g.score
+        FROM V_Usage_Aktuell u
+        JOIN V_GO_Meta g ON g.slug = u.slug
+        WHERE u.kampfformat = ? AND g.liga = 'master' AND g.ist_schatten = 0
+          AND g.zeit_sk = (SELECT MAX(zeit_sk) FROM Fact_GO_Meta)
+    """, conn), conn, params=(STANDARD_KAMPFFORMAT,))
+    if len(df) < 20:
+        raise DatenbasisFehlt(
+            f"Nur {len(df)} Pokemon in beiden Spielen gefuehrt (mindestens 20).")
+    return spearman(df["rang"].tolist(), df["score"].tolist())
+
+
 # --------------------------------------------------------------------------
 # Der Katalog
 # --------------------------------------------------------------------------
@@ -638,6 +715,85 @@ KATALOG: list[Hypothese] = [
                         "damit nicht unabhaengig. Bei 16 Tagen und vier "
                         "Wochenendtagen ist die Datenbasis ausserdem duenn -- die "
                         "Pruefung ist bei laengerer Zeitreihe zu wiederholen.",
+    ),
+    Hypothese(
+        schluessel="H11",
+        titel="Die Regionen spielen verschiedene Decks",
+        bereich=BEREICH_MAERKTE,
+        nullhypothese="Die Verteilung der Deck-Archetypen ist unabhaengig von der "
+                      "Region des Spielers.",
+        alternativhypothese="Mindestens eine Region bevorzugt andere Archetypen.",
+        begruendung="Die Laenderfrage laesst sich nur im Sammelkartenspiel stellen: "
+                    "allein diese Quelle liefert den Ort des Spielers mit. Traegt "
+                    "die Hypothese, ist eine globale Meta-Betrachtung fuer die "
+                    "Turniervorbereitung vor Ort zu grob -- wer in Japan spielt, "
+                    "bereitet sich auf ein anderes Feld vor als in Europa.",
+        verfahren="Chi-Quadrat-Unabhaengigkeitstest ueber die Kreuztabelle aus "
+                  "Region und Archetyp, gezaehlt in Spielern. Die Kennzahl ist "
+                  "kardinal (Personenzaehlung), beide Merkmale sind nominal.",
+        datenbasis="Limitless-Turnierstandings, verdichtet auf Regionen und die "
+                   "zehn meistgespielten Archetypen plus Restklasse.",
+        berechnung=_pruefe_laender,
+        bei_verwerfung="Deckwahl und Region haengen zusammen: die Maerkte spielen "
+                       "messbar verschieden.",
+        bei_beibehaltung="Kein regionaler Unterschied nachweisbar -- die TCG-Meta "
+                         "ist global einheitlich.",
+        einschraenkung="Turnierspieler sind keine Zufallsstichprobe der jeweiligen "
+                       "Region, und grosse Online-Turniere mischen die Maerkte. "
+                       "Die Aussage gilt fuer die Turnierszene, nicht fuer alle "
+                       "Spielenden.",
+    ),
+    Hypothese(
+        schluessel="H12",
+        titel="Superliga und Meisterliga sind zwei verschiedene Spiele",
+        bereich=BEREICH_QUELLEN,
+        nullhypothese="Zwischen den Bewertungen der Pokemon in Super- und "
+                      "Meisterliga besteht kein Zusammenhang.",
+        alternativhypothese="Die Bewertungen haengen zusammen.",
+        begruendung="Das GO-Gegenstueck zu H4: dieselben Pokemon unter anderer "
+                    "Regel (Wertedeckel 1500 gegen offen). Faellt der Zusammenhang "
+                    "schwach aus, rechtfertigt das die Liga als eigene Dimension -- "
+                    "dieselbe Modellentscheidung wie beim Kampfformat.",
+        verfahren="Spearman-Rangkorrelation der Scores. Die Scores sind kardinal, "
+                  "aber zwischen zwei verschieden kalibrierten Ranglisten ist nur "
+                  "die Reihenfolge vergleichbar, nicht die Zahl.",
+        datenbasis="pvpoke-Ranglisten, juengster Stand, in beiden Ligen gefuehrte "
+                   "Pokemon.",
+        berechnung=_pruefe_go_ligen,
+        bei_verwerfung="Die Ligen haengen zusammen -- entscheidend ist der Abstand "
+                       "des Koeffizienten zu eins: er ist der eigene Anteil der "
+                       "jeweiligen Liga.",
+        bei_beibehaltung="Kein Zusammenhang zwischen den Ligen: der Wertedeckel "
+                         "erzeugt eine vollstaendig eigene Meta.",
+    ),
+    Hypothese(
+        schluessel="H13",
+        titel="Staerke uebertraegt sich nicht zwischen den Spielen",
+        bereich=BEREICH_QUELLEN,
+        nullhypothese="Zwischen dem VGC-Rang eines Pokemon und seinem GO-Score "
+                      "besteht kein Zusammenhang.",
+        alternativhypothese="Wer im VGC oben steht, steht auch in GO oben.",
+        begruendung="Die spieluebergreifende Frage schlechthin -- und der Grund, "
+                    "warum Dim_Pokemon als konforme Dimension ueber allen Quellen "
+                    "steht. GO ersetzt Basiswerte durch eigene Werte, streicht "
+                    "Faehigkeiten und rechnet Attacken um: bleibt trotzdem ein "
+                    "Zusammenhang, ist die Staerke im Kern das Pokemon selbst; "
+                    "verschwindet er, macht das Regelwerk die Meta.",
+        verfahren="Spearman-Rangkorrelation zwischen Champions-Rang (Doppelkampf) "
+                  "und pvpoke-Score der Meisterliga. Ein negativer Koeffizient "
+                  "bedeutet Uebertragung: kleiner Rang ist besser, hoher Score ist "
+                  "besser.",
+        datenbasis="Juengster Stand beider Quellen, verknuepft ueber die konforme "
+                   "Pokemon-Dimension; Schattenformen ausgenommen.",
+        berechnung=_pruefe_spieluebergreifend,
+        bei_verwerfung="Die Spiele haengen zusammen; das Vorzeichen sagt, ob "
+                       "Staerke sich uebertraegt oder geradezu umkehrt.",
+        bei_beibehaltung="Kein Zusammenhang: jedes Regelwerk erzeugt seine eigene "
+                         "Meta, und die Staerke eines Pokemon ist keine Eigenschaft "
+                         "des Pokemon, sondern des Spiels.",
+        einschraenkung="Die Schnittmenge ist auf Pokemon beschraenkt, die in beiden "
+                       "Spielen gewertet werden; GO-exklusive Groessen wie "
+                       "Schattenformen bleiben aussen vor.",
     ),
 ]
 

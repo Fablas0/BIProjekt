@@ -56,6 +56,22 @@ ARCHIV_VERZEICHNIS = Path(os.getenv("VGC_BI_ARCHIV", PROJEKT_WURZEL / "archiv"))
 POKEAPI_BASIS = "https://pokeapi.co/api/v2"
 CHAMPIONS_BASIS = "https://championsbattledata.com"
 
+# Pokemon GO: PvP-Ranglisten von pvpoke. Bezogen aus dem GitHub-Repository des
+# Projekts -- dieselben Dateien, die die Website ausliefert, aber unter einer
+# stabilen Adresse. {wp} ist die Wettkampfpunkte-Grenze der Liga.
+GO_RANKING_URL = ("https://raw.githubusercontent.com/pvpoke/pvpoke/master/"
+                  "src/data/rankings/all/overall/rankings-{wp}.json")
+GO_LIGEN = {"great": 1500, "ultra": 2500, "master": 10000}
+
+# Sammelkartenspiel: Turnierdaten von Limitless. Die API verlangt einen
+# kostenlosen Schluessel (Registrierung); ohne Schluessel wird die Strecke
+# uebersprungen und als Qualitaetsbefund ausgewiesen, statt zu scheitern.
+TCG_API_BASIS = "https://play.limitlesstcg.com/api"
+TCG_API_SCHLUESSEL = os.getenv("VGC_BI_TCG_SCHLUESSEL", "")
+# Nur offizielle Turniere ab dieser Teilnehmerzahl -- kleine Ligaabende tragen
+# keine Laenderverteilung.
+TCG_MIN_TEILNEHMER = 50
+
 # PokeAPI ist unauthentifiziert und fair-use; 12 Threads bleiben deutlich unter
 # der inoffiziellen Grenze und halten den Erstimport unter zwei Minuten.
 HTTP_THREADS = int(os.getenv("VGC_BI_THREADS", "12"))

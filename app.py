@@ -38,6 +38,7 @@ from bi.ui import (  # noqa: E402
     seite_schaden,
     seite_scouting,
     seite_speedtiers,
+    seite_spielformen,
     seite_teambuilder,
 )
 
@@ -51,6 +52,7 @@ SEITEN = {
     "PC-System": seite_pc.zeichne,
     "OLAP-Explorer": seite_olap.zeichne,
     "Meta-Playbook": seite_playbook.zeichne,
+    "Spielformen": seite_spielformen.zeichne,
     "Hypothesen": seite_hypothesen.zeichne,
     "ETL & Datenqualitaet": seite_etl.zeichne,
 }
@@ -75,6 +77,7 @@ NAVIGATION: dict[str, list[tuple[str, str]]] = {
     "Vertiefung": [
         ("OLAP-Explorer", "Wuerfel frei navigieren: Slice, Dice, Drill-Down"),
         ("Meta-Playbook", "Verdichtete Handlungsempfehlungen"),
+        ("Spielformen", "VGC, Pokemon GO und Sammelkartenspiel im Vergleich"),
         ("Hypothesen", "Vorab formulierte Aussagen, statistisch geprueft"),
     ],
     "Betrieb": [

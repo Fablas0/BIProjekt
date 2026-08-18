@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from bi import warehouse  # noqa: E402
 from bi.config import ARCHIV_VERZEICHNIS  # noqa: E402
-from bi.etl import champions, pipeline, stammarchiv  # noqa: E402
+from bi.etl import champions, go, pipeline, spielformarchiv, stammarchiv, tcg  # noqa: E402
 
 # Ein Ausfall des Quellsystems ist kein Codefehler. Der eigene Exit-Code
 # erlaubt es dem aufrufenden Workflow, beides zu unterscheiden: 1 bedeutet
@@ -49,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"Verzeichnis des Rohdatenarchivs (Standard: {ARCHIV_VERZEICHNIS})")
     parser.add_argument("--ohne-archiv", action="store_true",
                         help="Das Archiv auf der Platte nicht einlesen")
+    parser.add_argument("--ohne-spielformen", action="store_true",
+                        help="TCG- und GO-Strecke ueberspringen")
     parser.add_argument("--db", help="Abweichender Pfad zur Datenbankdatei")
     argumente = parser.parse_args(argv)
 
@@ -64,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         # Stammdaten zuerst: ohne sie laesst sich kein Champions-Name aufloesen.
         stammarchiv.importiere_stammdaten(conn, argumente.archiv)
         eingelesen = champions.importiere_archiv(conn, argumente.archiv)
+        spielformarchiv.importiere(conn, argumente.archiv)
         if eingelesen["saetze"]:
             print(f"== Archiv eingelesen: {eingelesen['saetze']} Rohdatensaetze aus "
                   f"{eingelesen['dateien']} Dateien ==", flush=True)
@@ -92,6 +95,18 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"   {champ['meldung']}")
     print(f"   {champ.get('neu_archiviert', 0)} Rohdatensaetze neu archiviert.")
+
+    # Die weiteren Spielformen sind Zusatzquellen: ihr Ausfall ist ein Befund
+    # im Qualitaetsbericht, kein roter Lauf -- ein verlorener Champions-Tag
+    # waere unwiederbringlich, ein verpasster pvpoke-Stand nur eine Luecke.
+    if not argumente.ohne_spielformen:
+        print("\n== Schritt 3: Weitere Spielformen (GO, TCG) ==", flush=True)
+        for name, strecke in (("GO", go.laden), ("TCG", tcg.laden)):
+            ergebnis_spielform = strecke(conn, aus_archiv=argumente.aus_archiv)
+            if ergebnis_spielform.get("erfolgreich"):
+                print(f"   {name}: {ergebnis_spielform.get('geladen', 0)} Saetze.")
+            else:
+                print(f"   {name} uebersprungen: {ergebnis_spielform.get('meldung')}")
 
     umfang = warehouse.archiv_umfang(conn)
     if umfang.get("tage"):
