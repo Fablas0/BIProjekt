@@ -27,7 +27,7 @@ from pathlib import Path
 
 from . import warehouse
 from .config import ARCHIV_VERZEICHNIS
-from .etl import champions, stammarchiv
+from .etl import champions, go, spielformarchiv, stammarchiv, tcg
 
 Fortschritt = Callable[[float, str], None]
 
@@ -87,7 +87,17 @@ def sicherstellen(conn: sqlite3.Connection, archiv: Path | None = None,
         fortschritt(0.45, "Baue die Faktentabellen auf ...")
         ergebnis = champions.laden(
             conn, aus_archiv=True,
-            fortschritt=lambda anteil, text: fortschritt(0.45 + anteil * 0.5, text))
+            fortschritt=lambda anteil, text: fortschritt(0.45 + anteil * 0.45, text))
+
+        # Weitere Spielformen, sofern deren Archive vorliegen. Beide Strecken
+        # kommen aus dem Archiv ohne Netzzugriff aus; ein leeres Archiv ist
+        # kein Fehler -- die Quellen sind Zusatz, nicht Kern.
+        fortschritt(0.92, "Baue die weiteren Spielformen auf ...")
+        spielformarchiv.importiere(conn, verzeichnis)
+        if conn.execute("SELECT COUNT(*) FROM Archiv_GO").fetchone()[0]:
+            go.laden(conn, aus_archiv=True)
+        if conn.execute("SELECT COUNT(*) FROM Archiv_TCG").fetchone()[0]:
+            tcg.laden(conn, aus_archiv=True)
     finally:
         _regelbetrieb(conn)
 

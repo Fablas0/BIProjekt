@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from bi import warehouse  # noqa: E402
 from bi.config import ARCHIV_VERZEICHNIS  # noqa: E402
-from bi.etl import champions, stammarchiv  # noqa: E402
+from bi.etl import champions, spielformarchiv, stammarchiv  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     stamm = stammarchiv.exportiere_stammdaten(conn, argumente.ziel)
     print(f"Stammdaten: {stamm['saetze']} Saetze in {stamm['tabellen']} Tabellen, "
           f"{stamm['geschrieben']} neu geschrieben.")
+
+    spielformen = spielformarchiv.exportiere(conn, argumente.ziel)
+    if spielformen["dateien"]:
+        print(f"Spielformen (TCG/GO): {spielformen['dateien']} Dateien, "
+              f"{spielformen['geschrieben']} neu geschrieben.")
     print(f"Abgedeckter Zeitraum: {umfang['erster_tag']} bis {umfang['letzter_tag']} "
           f"({umfang['tage']} Tage).")
     return 0

@@ -2,8 +2,8 @@
 
 Die Rohdaten von Pokemon Champions liegen im Archiv, aber allein daraus laesst
 sich kein Data Warehouse aufbauen: Champions liefert nur Namen und Raenge. Typ,
-Basiswerte, Generation und die Eigenschaften der Attacken stammen aus der
-PokeAPI.
+Basiswerte, Generation und die Eigenschaften von Attacken, Items und
+Faehigkeiten stammen aus der PokeAPI.
 
 Ohne diesen Auszug muesste jeder Kaltstart 1351 Pokemon einzeln bei der PokeAPI
 abrufen -- rund 40 Sekunden, abhaengig von einem fremden Dienst, der genau dann
@@ -25,7 +25,7 @@ from . import archivdatei
 
 # Genau die Dimensionen, die aus der PokeAPI stammen und daher nicht aus dem
 # Champions-Archiv ableitbar sind.
-STAMMTABELLEN = ("Dim_Pokemon", "Dim_Attacke")
+STAMMTABELLEN = ("Dim_Pokemon", "Dim_Attacke", "Dim_Item", "Dim_Faehigkeit")
 
 UNTERVERZEICHNIS = "stammdaten"
 

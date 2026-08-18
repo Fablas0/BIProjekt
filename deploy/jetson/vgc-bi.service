@@ -1,0 +1,31 @@
+# Streamlit-Anwendung als Dienst. Lauscht nur auf 127.0.0.1 -- nach aussen
+# geht es ausschliesslich durch den Cloudflare Tunnel (bi.fablas.org).
+[Unit]
+Description=VGC Business Intelligence (Streamlit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@NUTZER@
+WorkingDirectory=@PROJEKT@
+# Daten ausserhalb des Repositories: das Warehouse ist ableitbar, die
+# Nutzerdatenbank nicht -- beide ueberleben so jeden Checkout.
+Environment=VGC_BI_DATA_DIR=@DATEN@
+Environment=VGC_BI_ANMELDUNG=1
+# Registrierungscode per "systemctl edit vgc-bi" ergaenzen:
+#   Environment=VGC_BI_REGISTRIERUNGSCODE=...
+ExecStart=@PROJEKT@/.venv/bin/streamlit run app.py \
+    --server.address 127.0.0.1 --server.port 8601 \
+    --server.headless true --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=5
+
+# Der Dienst braucht keine weitergehenden Rechte.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=@DATEN@ @PROJEKT@
+
+[Install]
+WantedBy=multi-user.target

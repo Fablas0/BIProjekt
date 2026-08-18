@@ -16,6 +16,33 @@ PROJEKT_WURZEL = Path(__file__).resolve().parents[2]
 DATEN_VERZEICHNIS = Path(os.getenv("VGC_BI_DATA_DIR", PROJEKT_WURZEL / "data"))
 DWH_PFAD = Path(os.getenv("VGC_BI_DB", DATEN_VERZEICHNIS / "vgc_dwh.db"))
 
+# Eigene Daten -- Nutzerkonten, PC-System, Teams -- liegen in einer **eigenen**
+# Datei. Das Warehouse ist eine Ableitung und wird bei jedem Kaltstart aus dem
+# Archiv neu erzeugt; alles, was darin laege, waere danach fort. Eigene Daten
+# sind der umgekehrte Fall: von Hand erfasst, nirgends sonst vorhanden, nicht
+# wiederbeschaffbar.
+NUTZER_DB_PFAD = Path(os.getenv("VGC_BI_NUTZER_DB", DATEN_VERZEICHNIS / "vgc_nutzer.db"))
+
+# Aufwand der Passwortableitung (PBKDF2-HMAC-SHA256). Der Wert folgt der
+# Empfehlung des OWASP fuer dieses Verfahren. Er steht im Datensatz jedes
+# Kontos, damit er spaeter angehoben werden kann, ohne bestehende Konten zu
+# entwerten.
+PBKDF2_ITERATIONEN = int(os.getenv("VGC_BI_PBKDF2", "600000"))
+
+# Zugangscode fuer die Selbstregistrierung. Ist er gesetzt, kann ein Konto nur
+# anlegen, wer ihn kennt -- die Anwendung steht unter bi.fablas.org im offenen
+# Netz. Das erste Konto (die Einrichtung) ist davon ausgenommen.
+REGISTRIERUNGSCODE = os.getenv("VGC_BI_REGISTRIERUNGSCODE", "")
+
+# Anmeldung erforderlich? Im oeffentlichen Betrieb ja. Fuer die lokale
+# Entwicklung laesst sie sich abschalten, ohne den Quelltext zu aendern.
+ANMELDUNG_ERFORDERLICH = os.getenv("VGC_BI_ANMELDUNG", "1") not in ("0", "aus", "nein")
+
+# Sperre nach wiederholten Fehlversuchen: nach so vielen Fehlversuchen in
+# diesem Zeitfenster wird die Anmeldung voruebergehend verweigert.
+ANMELDUNG_MAX_FEHLVERSUCHE = int(os.getenv("VGC_BI_MAX_FEHLVERSUCHE", "8"))
+ANMELDUNG_SPERRE_MINUTEN = int(os.getenv("VGC_BI_SPERRE_MINUTEN", "15"))
+
 # Das Rohdatenarchiv liegt bewusst NEBEN dem Datenverzeichnis, nicht darin:
 # ``data/`` ist von der Versionsverwaltung ausgeschlossen, und git steigt in ein
 # ausgeschlossenes Verzeichnis gar nicht erst hinab -- eine Wiedereinschluss-Regel
@@ -28,6 +55,22 @@ ARCHIV_VERZEICHNIS = Path(os.getenv("VGC_BI_ARCHIV", PROJEKT_WURZEL / "archiv"))
 # --------------------------------------------------------------------------
 POKEAPI_BASIS = "https://pokeapi.co/api/v2"
 CHAMPIONS_BASIS = "https://championsbattledata.com"
+
+# Pokemon GO: PvP-Ranglisten von pvpoke. Bezogen aus dem GitHub-Repository des
+# Projekts -- dieselben Dateien, die die Website ausliefert, aber unter einer
+# stabilen Adresse. {wp} ist die Wettkampfpunkte-Grenze der Liga.
+GO_RANKING_URL = ("https://raw.githubusercontent.com/pvpoke/pvpoke/master/"
+                  "src/data/rankings/all/overall/rankings-{wp}.json")
+GO_LIGEN = {"great": 1500, "ultra": 2500, "master": 10000}
+
+# Sammelkartenspiel: Turnierdaten von Limitless. Die API verlangt einen
+# kostenlosen Schluessel (Registrierung); ohne Schluessel wird die Strecke
+# uebersprungen und als Qualitaetsbefund ausgewiesen, statt zu scheitern.
+TCG_API_BASIS = "https://play.limitlesstcg.com/api"
+TCG_API_SCHLUESSEL = os.getenv("VGC_BI_TCG_SCHLUESSEL", "")
+# Nur offizielle Turniere ab dieser Teilnehmerzahl -- kleine Ligaabende tragen
+# keine Laenderverteilung.
+TCG_MIN_TEILNEHMER = 50
 
 # PokeAPI ist unauthentifiziert und fair-use; 12 Threads bleiben deutlich unter
 # der inoffiziellen Grenze und halten den Erstimport unter zwei Minuten.
@@ -52,6 +95,11 @@ META_RANGGRENZE = 50
 
 # Anteil, ab dem eine Attacke oder ein Item als Teil des Standard-Sets gilt.
 SET_SCHWELLE = 20.0
+
+# Signifikanzniveau der Hypothesenpruefung. 5 Prozent ist die Konvention der
+# empirischen Sozial- und Wirtschaftsforschung; der Wert steht hier sichtbar,
+# weil er eine Festlegung ist und keine Naturkonstante.
+ALPHA = 0.05
 
 # Vorhaltezeit der Quelle in Tagen. Alles darueber hinaus existiert nur noch im
 # eigenen Archiv.

@@ -1,0 +1,9 @@
+# Sichert die Nutzerdatenbank -- den einzigen Bestand des Geraets, der sich
+# nicht aus dem Repository wiederherstellen laesst.
+[Unit]
+Description=VGC BI: Sicherung der Nutzerdatenbank
+
+[Service]
+Type=oneshot
+User=@NUTZER@
+ExecStart=/bin/bash @PROJEKT@/deploy/jetson/sicherung.sh @DATEN@

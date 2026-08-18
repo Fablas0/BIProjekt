@@ -53,6 +53,10 @@ jobs:
         id: etl
         env:
           MAX_TAGE: ${{ inputs.max_tage }}
+          # Kostenloser Schluessel der Limitless-API (play.limitlesstcg.com).
+          # Ohne ihn wird die TCG-Strecke uebersprungen und als Befund
+          # ausgewiesen -- der Lauf bleibt gruen.
+          VGC_BI_TCG_SCHLUESSEL: ${{ secrets.VGC_BI_TCG_SCHLUESSEL }}
         run: |
           if [ -n "$MAX_TAGE" ]; then
             python -m scripts.etl_lauf --max-tage "$MAX_TAGE"
@@ -101,6 +105,13 @@ jobs:
         # erneuten Lauf zu beheben und darf das Tor nicht dauerhaft schliessen.
         run: python -m scripts.qualitaet_pruefen --annotationen
 
+      - name: Hypothesenkatalog
+        # Informativ, kein Tor: ein beibehaltenes H0 ist ein Ergebnis, kein
+        # Fehler. Der Bericht haelt fest, wie sich die Befunde mit wachsender
+        # Zeitreihe entwickeln.
+        if: always()
+        run: python -m scripts.hypothesen_pruefen --kurz || true
+
       - name: Zusammenfassung im Lauf hinterlegen
         if: always()
         run: |
@@ -109,5 +120,11 @@ jobs:
             echo ""
             echo '```'
             python -m scripts.qualitaet_pruefen --mindestindex 0 || true
+            echo '```'
+            echo ""
+            echo "## Hypothesenpruefung"
+            echo ""
+            echo '```'
+            python -m scripts.hypothesen_pruefen --kurz || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

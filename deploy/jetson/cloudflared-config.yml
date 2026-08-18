@@ -1,0 +1,14 @@
+# Cloudflare Tunnel: veroeffentlicht die lokal laufende Anwendung unter
+# bi.fablas.org, ohne einen Port zu oeffnen. Die Tunnel-ID stammt aus
+# "cloudflared tunnel create vgc-bi"; die JSON-Datei liegt daneben.
+tunnel: <TUNNEL-ID>
+credentials-file: /etc/cloudflared/<TUNNEL-ID>.json
+
+ingress:
+  - hostname: bi.fablas.org
+    service: http://127.0.0.1:8601
+    originRequest:
+      # Streamlit haelt eine WebSocket-Verbindung je Sitzung.
+      noTLSVerify: false
+  # Alles andere abweisen -- der Tunnel dient genau einer Unterseite.
+  - service: http_status:404

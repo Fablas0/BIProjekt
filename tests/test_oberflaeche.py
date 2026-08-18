@@ -17,6 +17,19 @@ from pathlib import Path
 
 import pytest
 
+# Die Oberflaechentests pruefen die Fachseiten, nicht die Anmeldemaske; die
+# Maske hat eigene Tests auf der Datenschicht (tests/test_nutzerdaten.py).
+# Abgeschaltet wird am Modulmerkmal, nicht ueber die Umgebungsvariable: im
+# Gesamtlauf hat ein frueher gesammeltes Testmodul bi.config laengst
+# importiert, und die Variable wuerde wirkungslos verpuffen.
+
+
+@pytest.fixture(autouse=True)
+def _ohne_anmeldung(monkeypatch):
+    from bi.ui import anmeldung
+
+    monkeypatch.setattr(anmeldung, "ANMELDUNG_ERFORDERLICH", False)
+
 WURZEL = Path(__file__).resolve().parents[1]
 DWH = Path(os.getenv("VGC_BI_DB", WURZEL / "data" / "vgc_dwh.db"))
 
@@ -59,12 +72,17 @@ pytestmark = pytest.mark.skipif(
 
 SEITEN = [
     "Meta-Cockpit",
+    "Trends",
     "Team-Preview-Advisor",
     "Gegner-Scouting",
     "Team-Builder",
     "Speed-Tiers",
+    "Schadensrechner",
+    "PC-System",
     "OLAP-Explorer",
     "Meta-Playbook",
+    "Spielformen",
+    "Hypothesen",
     "ETL & Datenqualitaet",
 ]
 
@@ -226,3 +244,27 @@ def test_olap_slice_filtert_wuerfel() -> None:
     app.multiselect(key="olap_filter_tag_label").set_value(
         [monatsfilter.options[0]]).run()
     assert not app.exception, f"Ausnahme beim Slice: {app.exception}"
+
+
+def test_ohne_anmeldung_bleibt_die_anwendung_verschlossen(monkeypatch) -> None:
+    """Die Anmeldung steht vor allem anderen.
+
+    Die Anwendung ist unter bi.fablas.org oeffentlich erreichbar; ohne
+    Anmeldung darf ausser der Maske nichts erscheinen -- keine Navigation,
+    keine Seitenleiste, keine Kennzahl. Getestet wird gegen das Modulmerkmal,
+    weil die Testreihe selbst mit abgeschalteter Anmeldung laeuft.
+    """
+    from bi.ui import anmeldung
+
+    monkeypatch.setattr(anmeldung, "ANMELDUNG_ERFORDERLICH", True)
+
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(str(WURZEL / "app.py"), default_timeout=180)
+    app.run()
+
+    assert not app.exception
+    # Keine Navigation: die Seitenknoepfe existieren nicht.
+    assert not [k for k in app.button if str(k.key or "").startswith("nav_")]
+    # Stattdessen die Maske: Benutzername- und Passwortfelder sind da.
+    assert app.text_input, "Die Anmeldemaske fehlt."

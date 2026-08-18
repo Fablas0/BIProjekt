@@ -21,30 +21,41 @@ import streamlit as st
 # bleiben. Streamlit startet aus der Wurzel, deshalb wird der Pfad hier ergaenzt.
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from bi import warehouse  # noqa: E402
+from bi import nutzerdaten, warehouse  # noqa: E402
 from bi.analytics import kpi, saison  # noqa: E402
 from bi.config import QUELLE_VORHALTUNG_TAGE  # noqa: E402
 from bi.ui import (  # noqa: E402
+    anmeldung,
     design,
     komponenten,
     seite_cockpit,
     seite_etl,
+    seite_hypothesen,
     seite_olap,
+    seite_pc,
     seite_playbook,
     seite_preview,
+    seite_schaden,
     seite_scouting,
     seite_speedtiers,
+    seite_spielformen,
     seite_teambuilder,
+    seite_trends,
 )
 
 SEITEN = {
     "Meta-Cockpit": seite_cockpit.zeichne,
+    "Trends": seite_trends.zeichne,
     "Team-Preview-Advisor": seite_preview.zeichne,
     "Gegner-Scouting": seite_scouting.zeichne,
     "Team-Builder": seite_teambuilder.zeichne,
     "Speed-Tiers": seite_speedtiers.zeichne,
+    "Schadensrechner": seite_schaden.zeichne,
+    "PC-System": seite_pc.zeichne,
     "OLAP-Explorer": seite_olap.zeichne,
     "Meta-Playbook": seite_playbook.zeichne,
+    "Spielformen": seite_spielformen.zeichne,
+    "Hypothesen": seite_hypothesen.zeichne,
     "ETL & Datenqualitaet": seite_etl.zeichne,
 }
 
@@ -54,16 +65,23 @@ SEITEN = {
 NAVIGATION: dict[str, list[tuple[str, str]]] = {
     "Ueberblick": [
         ("Meta-Cockpit", "Rangliste, Stabilitaet und Bewegung im Format"),
+        ("Trends", "Typen, Items, Neuzugaenge und Dauerbrenner im Verlauf"),
     ],
     "Vor dem Kampf": [
         ("Team-Preview-Advisor", "Welche vier von sechs nehme ich mit?"),
         ("Gegner-Scouting", "Womit ist bei diesem Gegner zu rechnen?"),
         ("Team-Builder", "Wo ist mein Team angreifbar?"),
         ("Speed-Tiers", "Wer handelt zuerst?"),
+        ("Schadensrechner", "Ueberlebt mein Pokemon diesen Treffer?"),
+    ],
+    "Eigener Bestand": [
+        ("PC-System", "Eigene Pokemon, Sets und Teams -- dauerhaft gespeichert"),
     ],
     "Vertiefung": [
         ("OLAP-Explorer", "Wuerfel frei navigieren: Slice, Dice, Drill-Down"),
         ("Meta-Playbook", "Verdichtete Handlungsempfehlungen"),
+        ("Spielformen", "VGC, Pokemon GO und Sammelkartenspiel im Vergleich"),
+        ("Hypothesen", "Vorab formulierte Aussagen, statistisch geprueft"),
     ],
     "Betrieb": [
         ("ETL & Datenqualitaet", "Ladelaeufe, Archiv und Qualitaetsbericht"),
@@ -102,11 +120,26 @@ def main() -> None:
     design.einbinden()
     design.plotly_grundstil()
 
+    # Die Anmeldung steht VOR allem anderen: die Anwendung laeuft unter
+    # bi.fablas.org im offenen Netz, und schon die Meta-Auswertung verraet,
+    # womit sich der Betreiber auf ein Turnier vorbereitet. Ohne Anmeldung
+    # wird ausschliesslich die Maske gezeichnet -- keine Navigation, keine
+    # Seitenleiste, keine Daten. Fuer die lokale Entwicklung laesst sich das
+    # ueber VGC_BI_ANMELDUNG=0 abschalten (siehe bi.ui.anmeldung).
+    conn = komponenten.hole_verbindung()
+    nutzerdaten.anhaengen(conn)
+    nutzer = anmeldung.verlangen(conn)
+    if nutzer is None:
+        return
+
     with st.sidebar:
         st.markdown("## VGC Business Intelligence")
         st.caption("Data Warehouse und Analytics fuer Pokemon Champions")
 
         seite = _navigation()
+        st.markdown("---")
+
+        anmeldung.seitenleiste(conn, nutzer)
         st.markdown("---")
 
         _saisonauswahl()

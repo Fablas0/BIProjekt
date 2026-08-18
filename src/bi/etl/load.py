@@ -275,6 +275,32 @@ QUELLEN = {
         "hat_partner_gewicht": 0,
         "vorhaltung_tage": QUELLE_VORHALTUNG_TAGE,
     },
+    "go_pvpoke": {
+        "schluessel": "go_pvpoke",
+        "name": "pvpoke.com (Pokemon GO PvP)",
+        "beschreibung": "Simulationsgestuetzte PvP-Rangliste je Liga. Bewertet jedes "
+                        "Pokemon mit einer Punktzahl von 0 bis 100 -- kardinal, im "
+                        "Gegensatz zum Rang von Champions. Ueberschreibt den Stand "
+                        "bei jeder Balance-Anpassung ohne eigene Historie.",
+        "ist_offiziell": 0,
+        "granularitaet_zeit": "Stand",
+        "messniveau_nutzung": "kardinal",
+        "hat_partner_gewicht": 0,
+        "vorhaltung_tage": 0,
+    },
+    "tcg_limitless": {
+        "schluessel": "tcg_limitless",
+        "name": "Limitless (Pokemon TCG Turniere)",
+        "beschreibung": "Turnierstandings des Sammelkartenspiels samt Land des "
+                        "Spielers -- die Grundlage des Laendervergleichs. Gezaehlt "
+                        "werden Spieler je Deck-Archetyp: kardinale Kennzahlen, "
+                        "Summen und Anteile sind zulaessig.",
+        "ist_offiziell": 0,
+        "granularitaet_zeit": "Turnier",
+        "messniveau_nutzung": "kardinal",
+        "hat_partner_gewicht": 0,
+        "vorhaltung_tage": None,
+    },
     "pokeapi": {
         "schluessel": "pokeapi",
         "name": "PokeAPI",
@@ -363,3 +389,66 @@ def lade_saison(conn: sqlite3.Connection, schluessel: str, bezeichnung: str,
 def lade_attacken_dimension(conn: sqlite3.Connection, saetze: list[dict[str, Any]]) -> None:
     """Laedt die Attacken-Dimension."""
     _sichere_dimension(conn, "Dim_Attacke", "slug", saetze)
+
+
+def lade_item_dimension(conn: sqlite3.Connection, saetze: list[dict[str, Any]]) -> None:
+    """Laedt die Item-Dimension aus den Stammdaten der Hauptspiele."""
+    _sichere_dimension(conn, "Dim_Item", "slug", saetze)
+
+
+def lade_faehigkeit_dimension(conn: sqlite3.Connection, saetze: list[dict[str, Any]]) -> None:
+    """Laedt die Faehigkeiten-Dimension aus den Stammdaten der Hauptspiele."""
+    _sichere_dimension(conn, "Dim_Faehigkeit", "slug", saetze)
+
+
+# Ligen von Pokemon GO. Die Wettkampfpunkte-Grenze ist der Parameter, der die
+# Meta trennt: dieselben Pokemon, aber unterschiedlich wertvoll je Grenze.
+LIGEN = {
+    "great": {"schluessel": "great", "bezeichnung": "Superliga", "wp_grenze": 1500},
+    "ultra": {"schluessel": "ultra", "bezeichnung": "Hyperliga", "wp_grenze": 2500},
+    "master": {"schluessel": "master", "bezeichnung": "Meisterliga", "wp_grenze": None},
+}
+
+
+def lade_liga(conn: sqlite3.Connection, schluessel: str) -> int:
+    """Legt eine Liga an oder liefert ihren Schluessel."""
+    satz = LIGEN[schluessel]
+    conn.execute(
+        """INSERT INTO Dim_Liga (schluessel, bezeichnung, wp_grenze)
+           VALUES (:schluessel, :bezeichnung, :wp_grenze)
+           ON CONFLICT(schluessel) DO UPDATE SET bezeichnung = excluded.bezeichnung""",
+        satz)
+    conn.commit()
+    return int(conn.execute("SELECT liga_sk FROM Dim_Liga WHERE schluessel = ?",
+                            (schluessel,)).fetchone()[0])
+
+
+# Zuordnung Land -> Region. Die Region ist die Konsolidierungsebene des
+# Laendervergleichs: einzelne Laender sind in Turnierdaten oft zu duenn
+# besetzt, um eine Verteilung zu tragen. Nicht gelistete Laender fallen in
+# 'Uebrige' -- sichtbar, nicht verworfen.
+REGIONEN = {
+    "Europa": ["DE", "AT", "CH", "FR", "IT", "ES", "PT", "NL", "BE", "GB", "IE",
+               "DK", "SE", "NO", "FI", "PL", "CZ", "SK", "HU", "GR", "RO", "BG",
+               "HR", "SI", "LT", "LV", "EE", "LU", "MT", "CY", "IS", "UA", "RS"],
+    "Nordamerika": ["US", "CA", "MX"],
+    "Lateinamerika": ["BR", "AR", "CL", "CO", "PE", "EC", "UY", "PY", "BO", "VE",
+                      "CR", "PA", "GT", "SV", "HN", "NI", "DO"],
+    "Asien-Pazifik": ["JP", "KR", "TW", "HK", "SG", "MY", "TH", "PH", "ID", "VN",
+                      "IN", "CN", "AU", "NZ"],
+}
+
+_REGION_JE_LAND = {land: region for region, laender in REGIONEN.items()
+                   for land in laender}
+
+
+def lade_markt(conn: sqlite3.Connection, iso2: str, name: str | None = None) -> int:
+    """Legt einen Markt (Land) an oder liefert seinen Schluessel."""
+    iso2 = iso2.upper()
+    conn.execute(
+        """INSERT INTO Dim_Markt (iso2, name, region) VALUES (?, ?, ?)
+           ON CONFLICT(iso2) DO NOTHING""",
+        (iso2, name or iso2, _REGION_JE_LAND.get(iso2, "Uebrige")))
+    conn.commit()
+    return int(conn.execute("SELECT markt_sk FROM Dim_Markt WHERE iso2 = ?",
+                            (iso2,)).fetchone()[0])
