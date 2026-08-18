@@ -285,6 +285,19 @@ CREATE TABLE IF NOT EXISTS ETL_Lauf (
     meldung          TEXT
 );
 
+-- Was die Quelle beim letzten Zugriff ueberhaupt angeboten hat. Ohne diese
+-- Angabe laesst sich hinterher nicht mehr entscheiden, ob ein fehlender Tag ein
+-- eigenes Versaeumnis ist oder die Quelle ihn nie gefuehrt hat -- beides sieht
+-- im Ladeprotokoll gleich aus. Je Quelle genuegt der jeweils letzte Stand.
+CREATE TABLE IF NOT EXISTS Quelle_Stand (
+    quelle           TEXT PRIMARY KEY,       -- 'Champions' | 'PokeAPI'
+    abgerufen_am     TEXT    NOT NULL,       -- Zeitpunkt unseres Zugriffs
+    stand_der_quelle TEXT,                   -- Zeitstempel der Quelle selbst
+    letzter_tag      TEXT,                   -- juengster angebotener Tag (ISO)
+    tage_verfuegbar  INTEGER NOT NULL DEFAULT 0,
+    tage_json        TEXT    NOT NULL DEFAULT '[]'  -- alle angebotenen Tage
+);
+
 CREATE TABLE IF NOT EXISTS DQ_Befund (
     befund_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     lauf_id     INTEGER NOT NULL REFERENCES ETL_Lauf (lauf_id),
@@ -466,7 +479,7 @@ def zuruecksetzen(conn: sqlite3.Connection, nur_fakten: bool = False,
     fakten = ["Fact_Champions_Usage", "Fact_Champions_Merkmal"]
     stamm = ["Dim_Pokemon", "Dim_Zeit", "Dim_Attacke",
              "Dim_Saison", "Dim_Kampfformat", "Dim_Quelle"]
-    meta = ["Stage_Pokeapi", "DQ_Befund", "ETL_Lauf"]
+    meta = ["Stage_Pokeapi", "DQ_Befund", "ETL_Lauf", "Quelle_Stand"]
 
     conn.execute("PRAGMA foreign_keys = OFF")
     for tab in fakten + ([] if nur_fakten else stamm) + meta:

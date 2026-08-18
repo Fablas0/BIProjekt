@@ -93,6 +93,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"   {champ['meldung']}")
     print(f"   {champ.get('neu_archiviert', 0)} Rohdatensaetze neu archiviert.")
 
+    # Was die Quelle angeboten hat, gehoert ins Protokoll: ohne diese Zeile ist
+    # "nichts Neues geladen" nicht davon zu unterscheiden, dass die Quelle ihr
+    # Format geaendert hat und wir ihr Angebot nicht mehr lesen koennen.
+    stand = champ.get("quelle_stand")
+    if stand:
+        print(f"   Quellstand (Zugriff {stand['abgerufen_am'][:10]}): "
+              f"{stand['tage_verfuegbar']} angebotene Tage"
+              + (f" bis {stand['letzter_tag']}" if stand["letzter_tag"] else "")
+              + (f", Quelle erzeugt {stand['stand_der_quelle']}"
+                 if stand["stand_der_quelle"] else "")
+              + ".")
+
     umfang = warehouse.archiv_umfang(conn)
     if umfang.get("tage"):
         print(f"   Archiv: {umfang['tage']} Tage "

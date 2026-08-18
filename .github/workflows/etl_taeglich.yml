@@ -92,10 +92,14 @@ jobs:
         # Erst nach der Sicherung: ein Qualitaetsmangel darf nicht dazu fuehren,
         # dass ein unwiederbringlicher Tagesstand verloren geht.
         #
-        # Ohne Angabe gilt bi.quality.MINDESTINDEX. Die Schwelle stand zuvor als
-        # Zahl in beiden Workflows und in der Oberflaeche -- drei Stellen, die
-        # auseinanderlaufen konnten.
-        run: python -m scripts.qualitaet_pruefen
+        # Ohne Angabe gilt bi.quality.MINDESTINDEX -- die Schwelle stand zuvor
+        # als Zahl in beiden Workflows und in der Oberflaeche, drei Stellen, die
+        # auseinanderlaufen konnten. Das Tor bewertet die eigene Verarbeitung:
+        # ein von der Quelle angebotener, aber nicht geholter Tag faerbt den
+        # Lauf rot. Veroeffentlicht die Quelle selbst nichts mehr, erscheint das
+        # als Warnung am Lauf -- ein fremder Ausfall ist nicht durch einen
+        # erneuten Lauf zu beheben und darf das Tor nicht dauerhaft schliessen.
+        run: python -m scripts.qualitaet_pruefen --annotationen
 
       - name: Zusammenfassung im Lauf hinterlegen
         if: always()

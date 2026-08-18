@@ -26,10 +26,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="Erforderlicher Qualitaetsindex in Prozent "
                              f"(Standard: {quality.MINDESTINDEX:.0f})")
     parser.add_argument("--db", help="Abweichender Pfad zur Datenbankdatei")
+    parser.add_argument("--annotationen", action="store_true",
+                        help="Beobachtungen zusaetzlich als GitHub-Annotation ausgeben")
     argumente = parser.parse_args(argv)
 
     conn = warehouse.verbindung(argumente.db)
     ergebnisse = quality.pruefe_alles(conn)
+    beobachtungen = quality.beobachte_alles(conn)
     index = quality.qualitaetsindex(ergebnisse)
 
     breite = max(len(e.regel) for e in ergebnisse) + 2
@@ -42,6 +45,15 @@ def main(argv: list[str] | None = None) -> int:
 
     bestanden = sum(1 for e in ergebnisse if e.bestanden)
     print(f"Qualitaetsindex: {index} % ({bestanden} von {len(ergebnisse)} Regeln bestanden)")
+
+    # Beobachtungen stehen bewusst unter dem Strich: sie beschreiben fremde
+    # Umstaende und gehen nicht in den Index ein, muessen aber auffallen.
+    if beobachtungen:
+        print("\nBeobachtungen (ausserhalb der Bewertung)")
+        for b in beobachtungen:
+            print(f"HINW  {b.regel:<{breite}} {b.befund}")
+            if argumente.annotationen:
+                print(f"::warning title={b.regel}::{b.befund}")
 
     if index < argumente.mindestindex:
         print(f"\nFEHLER: Der Qualitaetsindex liegt unter dem geforderten Mindestwert von "

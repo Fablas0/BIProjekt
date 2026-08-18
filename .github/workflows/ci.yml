@@ -98,8 +98,10 @@ jobs:
         if: steps.etl.outputs.quelle == 'an'
         # Bricht ab, wenn der Qualitaetsindex unter den Schwellwert faellt.
         # Massgeblich ist bi.quality.MINDESTINDEX -- dieselbe Zahl, an der die
-        # Oberflaeche die Kachel des Qualitaetsindex einfaerbt.
-        run: python -m scripts.qualitaet_pruefen
+        # Oberflaeche die Kachel des Qualitaetsindex einfaerbt. Fremde Umstaende
+        # -- etwa eine Quelle, die nichts Neues veroeffentlicht -- erscheinen
+        # als Warnung, nicht als Fehler.
+        run: python -m scripts.qualitaet_pruefen --annotationen
 
       - name: Oberflaechentests gegen das befuellte Warehouse
         # Erst hier laufen sie wirklich: ohne Datenbank ueberspringen sie sich

@@ -17,6 +17,7 @@ Ladelauf beliebig wiederholbar.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -60,6 +61,63 @@ def lauf_abschliessen(conn: sqlite3.Connection, lauf_id: int, status: str,
         (_jetzt(), status, gelesen, geladen, abgewiesen, round(dauer, 2), meldung, lauf_id),
     )
     conn.commit()
+
+
+def quelle_stand_schreiben(conn: sqlite3.Connection, quelle: str,
+                           tage: list[str], stand: str = "") -> None:
+    """Haelt fest, welche Tagesstaende die Quelle beim Zugriff angeboten hat.
+
+    Der Ladelauf sieht das ohnehin, verwarf es bisher aber. Ohne diese Angabe
+    laesst sich eine Luecke im Archiv nicht bewerten: ein Tag, den die Quelle nie
+    gefuehrt hat, ist kein Versaeumnis des Ladelaufs, ein uebersehener dagegen
+    schon. Beides sieht im Protokoll gleich aus.
+
+    Nur der jeweils letzte Stand wird gehalten -- er beschreibt die Quelle, nicht
+    die Historie unserer Zugriffe; die steht in ``ETL_Lauf``.
+    """
+    tage = sorted(tage)
+    conn.execute(
+        """INSERT INTO Quelle_Stand
+               (quelle, abgerufen_am, stand_der_quelle, letzter_tag,
+                tage_verfuegbar, tage_json)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(quelle) DO UPDATE SET
+               abgerufen_am     = excluded.abgerufen_am,
+               stand_der_quelle = excluded.stand_der_quelle,
+               letzter_tag      = excluded.letzter_tag,
+               tage_verfuegbar  = excluded.tage_verfuegbar,
+               tage_json        = excluded.tage_json""",
+        (quelle, _jetzt(), stand or None, tage[-1] if tage else None,
+         len(tage), json.dumps(tage, separators=(",", ":"))),
+    )
+    conn.commit()
+
+
+def quelle_stand_lesen(conn: sqlite3.Connection, quelle: str) -> dict[str, Any] | None:
+    """Liefert den zuletzt festgehaltenen Quellstand -- ``None``, wenn keiner vorliegt.
+
+    ``tage`` ist die Liste der angebotenen Tage; sie ist leer, wenn die Quelle
+    zwar erreichbar war, aber nichts fuehrte -- ein Unterschied, der fuer die
+    Qualitaetsregeln zaehlt.
+    """
+    zeile = conn.execute(
+        """SELECT abgerufen_am, stand_der_quelle, letzter_tag, tage_verfuegbar, tage_json
+             FROM Quelle_Stand WHERE quelle = ?""", (quelle,)).fetchone()
+    if zeile is None:
+        return None
+
+    try:
+        tage = json.loads(zeile["tage_json"])
+    except (TypeError, ValueError):
+        tage = []
+
+    return {
+        "abgerufen_am": zeile["abgerufen_am"],
+        "stand_der_quelle": zeile["stand_der_quelle"],
+        "letzter_tag": zeile["letzter_tag"],
+        "tage_verfuegbar": zeile["tage_verfuegbar"],
+        "tage": tage,
+    }
 
 
 def befunde_protokollieren(conn: sqlite3.Connection, lauf_id: int,
