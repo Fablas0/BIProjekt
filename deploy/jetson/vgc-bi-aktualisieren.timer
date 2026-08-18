@@ -1,0 +1,11 @@
+# Taeglich nach dem GitHub-Actions-Lauf (05:00 UTC): eine Stunde Abstand
+# genuegt, und ein verpasster Lauf wird nachgeholt.
+[Unit]
+Description=VGC BI: taegliche Datenuebernahme
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
