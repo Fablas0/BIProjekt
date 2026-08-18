@@ -3,10 +3,19 @@
 Business-Intelligence-Lösung für **Pokémon Champions**, die seit April 2026
 offizielle Wettkampfplattform des Pokémon-Turnierbetriebs.
 
-Das Projekt lädt die täglichen Ranked-Daten von Champions, reichert sie mit
-Stammdaten der PokeAPI an, archiviert sie dauerhaft in einem historisierten Data
-Warehouse und stellt darauf ein Dashboard mit Kennzahlen, OLAP-Auswertung,
-Team-Analysen und einem Team-Preview-Advisor bereit.
+Das Projekt führt **vier Quellsysteme** in einem historisierten Data Warehouse
+zusammen: die täglichen Ranked-Daten von Pokémon Champions, die Stammdaten der
+Hauptspiele (PokeAPI), die PvP-Meta von Pokémon GO (pvpoke) und die
+Turnier-Meta des Sammelkartenspiels samt Länderangabe (Limitless). Darauf
+stehen ein Dashboard mit Kennzahlen, OLAP-Auswertung, Team-Analysen, einem
+Team-Preview-Advisor und einem Schadensrechner — sowie ein **Hypothesenkatalog**,
+der dreizehn vorab formulierte Aussagen statistisch prüft, statt sie zu
+behaupten. Ein PC-System mit Nutzerkonten speichert eigene Pokémon, Sets und
+Teams dauerhaft zwischen den Sitzungen.
+
+Warum die Dinge so gebaut sind, wie sie gebaut sind — je Use-Case der
+Gedankengang samt verworfener Alternativen — steht gesammelt in
+[`docs/entscheidungen.md`](docs/entscheidungen.md).
 
 **Live: <https://biprojekt-9uepcwtgxhxxmgkyv8furo.streamlit.app>**
 
@@ -31,42 +40,57 @@ vier der sechs Pokémon nehme ich im Team-Preview mit?
 | Was spielt der Gegner? | Gegner-Scouting mit erwarteter Konfiguration |
 | Wo ist mein Team verwundbar? | Defensivprofil, gewichtet mit der Meta-Präsenz |
 | Wer handelt zuerst? | Speed-Tiers aus den real gespielten Statuspunkten |
+| Überlebt mein Pokémon diesen Treffer? | Schadensrechner nach der Formel der Hauptspiele |
+| Welche Typen und Items setzen sich durch? | Trendanalysen auf der Archiv-Zeitreihe |
+| Spielen andere Länder anders? | Länderhypothese auf den TCG-Turnierdaten (H11) |
+| Überträgt sich Stärke zwischen den Spielen? | Spielübergreifende Hypothesen (H12, H13) |
 | **Welche 4 nehme ich mit?** | **Team-Preview-Advisor** |
+
+Jede dieser Fragen ist entweder eine Kennzahl im Dashboard oder — wo eine
+Behauptung im Raum steht — eine **Hypothese** mit Nullhypothese, Verfahren,
+Effektstärke und Holm-Bonferroni-korrigierter Entscheidung.
 
 ---
 
 ## Architektur
 
 ```
-┌──────────────────┐        ┌──────────────────────┐
-│     PokeAPI      │        │  Pokémon Champions   │   Quellsysteme
-│   (Stammdaten)   │        │  (Ranked, täglich)   │
-└────────┬─────────┘        └──────────┬───────────┘
-         │      EXTRACT                │   parallelisiert, mit Retry
-         └───────────┬─────────────────┘
-                     ▼
-        ┌────────────────────────┐
-        │  Stage_Pokeapi         │        Schicht 1: Staging + Archiv
-        │  Archiv_Champions      │        wird NIE geleert
-        └───────────┬────────────┘
-                    │  TRANSFORM
-                    │  Filterung · Harmonisierung · Anreicherung
-                    ▼
-        ┌────────────────────────┐
-        │  Core Data Warehouse   │        Schicht 2: Star-Schema
-        │  7 Dimensionen         │        Dim_Pokemon bi-temporal
-        │  2 Faktentabellen      │        Fakten nicht-volatil
-        └───────────┬────────────┘
-                    │
-        ┌───────────┴───────────┐
-        ▼                       ▼
-┌──────────────┐        ┌──────────────┐
-│  ETL_Lauf    │        │  Analytics   │        Schicht 3: Metadaten
-│  DQ_Befund   │        │  KPI · OLAP  │        + Analyseschicht
-└──────────────┘        └──────┬───────┘
+┌──────────────┐  ┌──────────────────┐  ┌──────────┐  ┌──────────────┐
+│   PokeAPI    │  │ Pokemon Champions│  │  pvpoke  │  │  Limitless   │  Quellsysteme
+│ (Hauptspiele:│  │ (VGC-Ranked,     │  │ (GO-PvP, │  │ (TCG-Turniere│
+│  Stammdaten) │  │  täglich)        │  │  je Liga)│  │  mit Land)   │
+└──────┬───────┘  └────────┬─────────┘  └────┬─────┘  └──────┬───────┘
+       │       EXTRACT     │    parallelisiert, mit Retry    │
+       └─────────┬─────────┴──────────┬──────────────────────┘
+                 ▼                    ▼
+      ┌─────────────────────────────────────────┐
+      │  Stage_Pokeapi      Archiv_Champions    │   Schicht 1: Staging + Archiv
+      │  Archiv_GO          Archiv_TCG          │   wird NIE geleert,
+      └───────────────────┬─────────────────────┘   mitversioniert
+                          │  TRANSFORM: Filterung · Harmonisierung · Anreicherung
+                          ▼
+      ┌─────────────────────────────────────────┐
+      │  Core Data Warehouse (Star-Schema)      │   Schicht 2
+      │  11 Dimensionen (Dim_Pokemon konform    │
+      │  über alle Spielformen, bi-temporal)    │
+      │  4 Faktentabellen                       │
+      └───────┬─────────────────────────────────┘
+              │                    ┌──────────────────────┐
+              │                    │  Nutzerdatenbank     │  eigener Lebenszyklus:
+              │      ATTACH ◄──────┤  Konten · PC-System  │  nicht ableitbar,
+              │                    │  Teams               │  überlebt jeden Neuaufbau
+              ▼                    └──────────────────────┘
+   ┌──────────┴───────────┐
+   ▼                      ▼
+┌──────────────┐   ┌───────────────────────────┐
+│  ETL_Lauf    │   │  Analytics                │   Schicht 3: Metadaten + Analyse
+│  DQ_Befund   │   │  KPI · OLAP · Trends      │
+└──────────────┘   │  Hypothesen · Schaden     │
+                   └───────────┬───────────────┘
                                ▼
                         ┌─────────────┐
-                        │  Streamlit  │        Präsentationsschicht
+                        │  Streamlit  │   Präsentationsschicht
+                        │  mit Konten │   (bi.fablas.org)
                         └─────────────┘
 ```
 
@@ -76,14 +100,22 @@ vier der sechs Pokémon nehme ich im Team-Preview mit?
 |---|---|---|
 | `Fact_Champions_Usage` | Pokémon × Kampfformat × Saison × **Tag** | Nutzungsrang, Rangperzentil |
 | `Fact_Champions_Merkmal` | … × Merkmal | Anteil, Statuspunkte, berechnete Statuswerte |
+| `Fact_GO_Meta` | Pokémon × Liga × Stand | Score 0–100 (kardinal), abgeleiteter Rang |
+| `Fact_TCG_Meta` | Deck × Land × Turniertag | Spieler, Top-8 (kardinal, zählbar) |
 
 Der Merkmalsfakt hält Attacken, Items, Fähigkeiten, Wesen, Punkteverteilungen und
 Teampartner in einer Satzstruktur — genau so, wie die Quelle sie liefert. Eine
 künstliche Aufteilung auf sechs Tabellen hätte die Struktur der Quelle verdeckt,
 ohne etwas zu gewinnen.
 
-**Konforme Dimensionen:** `Dim_Pokemon`, `Dim_Zeit`, `Dim_Saison`,
-`Dim_Kampfformat`, `Dim_Quelle`, `Dim_Attacke`.
+**Konforme Dimensionen:** `Dim_Pokemon` (über alle Spielformen), `Dim_Zeit`,
+`Dim_Saison`, `Dim_Kampfformat`, `Dim_Quelle`, `Dim_Attacke`, `Dim_Item`,
+`Dim_Faehigkeit`, `Dim_Liga`, `Dim_Markt`, `Dim_TCG_Deck`.
+
+Items und Fähigkeiten kommen aus den **Hauptspielen** (PokeAPI): Champions
+nennt zum getragenen Item nur den Namen — Wirkung und Kategorie existieren nur
+dort. Die Wirkungsklasse wird selbst vergeben, weil die PokeAPI-Kategorien am
+Verkaufsort orientiert sind und nicht daran, was das Item im Kampf tut.
 
 **Dimensionshierarchien** (Konsolidierungspfade für Drill-Down und Roll-Up):
 
@@ -92,6 +124,7 @@ ohne etwas zu gewinnen.
 - Typ: `Primärtyp → Typ-Kombination`
 - Rolle: `Offensivprofil → Teamrolle → Speed-Klasse`
 - Format: `Saison → Kampfformat`
+- Markt: `Region → Land` (Ländervergleich im Sammelkartenspiel)
 
 ---
 
@@ -117,6 +150,13 @@ Auf der **Merkmalsebene** — welche Attacke in wie viel Prozent der Sets vorkom
 liefert die Quelle dagegen echte Anteile. Dort ist der Herfindahl-Index zulässig
 und wird eingesetzt: als Maß für die Vorhersagbarkeit eines Sets.
 
+Die neuen Quellen messen anders: pvpoke bewertet mit einem **Score von 0 bis
+100** (kardinal), Limitless **zählt Spieler** (kardinal). Damit die Auswertung
+das nicht je Fall „weiß", steht das Messniveau als Merkmal an der Quelle
+(`Dim_Quelle.messniveau_nutzung`) — und dieselbe Regel bestimmt auch das
+statistische Verfahren im Hypothesenkatalog: Rangdaten bekommen Rangverfahren,
+Zählungen bekommen Chi-Quadrat.
+
 Zwei Tests sichern das strukturell ab: der Kennzahlenkatalog des OLAP-Explorers
 darf keine Summenaggregation über einen Rang anbieten, und ein Anteil in Prozent
 entsteht nur bei additiven Kennzahlen.
@@ -127,6 +167,82 @@ entstand die Aussage „120 von 235 Ausprägungen decken 80 Prozent ab". Sie war
 ohne Gehalt, und sie widersprach genau dem Grundsatz, den dieser Abschnitt
 aufstellt. Jede Kennzahl trägt jetzt selbst, ob ein Anteil über ihr zulässig ist
 und ob ein kleinerer Wert der bessere ist.
+
+---
+
+## Hypothesenkatalog: prüfen statt behaupten
+
+Ein Dashboard zeigt, *was* der Fall ist — nicht, ob das Gezeigte mehr ist als
+Rauschen. Bei 235 Pokémon und zwei Formaten findet das Auge in jeder Grafik ein
+Muster. Der Katalog (`bi/analytics/hypothesen.py`, Seite *Hypothesen*,
+kopflos: `python -m scripts.hypothesen_pruefen`) macht daraus **dreizehn
+prüfbare Aussagen** in vier Bereichen: Wettkampf-Metagame, Stammdaten,
+Quellenvergleich über die Spielformen, Länder- und Marktvergleich.
+
+Jede Hypothese ist **vor** dem Blick in die Daten formuliert und trägt
+Nullhypothese, Alternativhypothese, fachliche Begründung, Verfahren,
+Datenbasis, beide Befundtexte — und ihre **Einschränkung**, denn eine
+Einschränkung, die erst nach dem Ergebnis formuliert wird, ist eine Ausrede.
+
+Drei Regeln gegen Scheinergebnisse:
+
+1. **Das Messniveau bestimmt das Verfahren.** Ausschließlich verteilungsfreie
+   Tests (Spearman, Mann-Whitney-U, Wilcoxon, Kruskal-Wallis, Chi-Quadrat) —
+   ein t-Test setzt Intervallskala voraus, die Ränge nicht haben.
+2. **Kein p-Wert ohne Effektstärke.** Bei n = 235 wird fast jeder Unterschied
+   signifikant; erst Cliffs Delta, Cramérs V oder ρ sagen, ob er zählt.
+3. **Holm-Bonferroni über die Familie.** Dreizehn Einzeltests zum Niveau 5 %
+   lieferten sonst mit rund 49 % Wahrscheinlichkeit mindestens einen reinen
+   Zufallstreffer. Nicht prüfbare Hypothesen (Quelle nicht geladen) gehen
+   nicht in die Korrektur ein und werden als *nicht prüfbar* ausgewiesen —
+   nie stillschweigend als „nicht verworfen".
+
+Befunde auf dem aktuellen Bestand (16 Tage): Das Format **driftet** nachweislich
+(H1, ρ = −0,65 — ein alter Stand veraltet wirklich, das Archiv ist damit
+Voraussetzung, nicht Kür). Die Lehrmeinung „Initiative entscheidet" hält der
+Prüfung **nicht** stand (H2, p = 0,13), die Basiswertsumme dagegen schon (H3,
+mittlerer Effekt). Flächenattacken sind messbar ein Doppelkampf-Merkmal (H5)
+und Bizarroraum-Träger messbar langsamer (H9) — beides bestätigt zugleich, dass
+die Verknüpfung von Champions-Merkmalen und Hauptspiel-Stammdaten die
+Spielregeln korrekt abbildet.
+
+Die Verteilungsfunktionen (Normal, t, Chi-Quadrat) sind selbst umgesetzt und
+gegen Tabellenwerte getestet — es gibt keine SciPy-Version, die Python 3.10
+bis 3.14 gleichzeitig bedient, und das Projekt hat SciPy dafür schon einmal
+ausgebaut.
+
+---
+
+## Eigener Bestand: PC-System, Konten, Schadensrechner
+
+Die Meta-Auswertung sagt, was *andere* spielen. Das **PC-System** (benannt nach
+dem PC der Spiele) erfasst die eigenen Pokémon — Item, Fähigkeit, Wesen,
+Statuspunkte nach Champions-Regeln, bis zu vier Attacken — und stellt Teams
+aus bis zu sechs Einträgen zusammen. Erfasst wird über Auswahlfelder aus den
+Dimensionen, nie als Freitext: nur so bleibt jeder Eintrag verknüpfbar.
+
+Eigene Daten liegen in einer **eigenen Datenbank** (`vgc_nutzer.db`), die per
+`ATTACH` an der Warehouse-Verbindung hängt. Der Grund ist der Lebenszyklus:
+das Warehouse ist eine Ableitung und entsteht bei jedem Kaltstart aus dem
+Archiv neu — eigene Einträge darin wären danach fort. Der Bezug zur
+Pokémon-Dimension läuft über den natürlichen Schlüssel (`slug`), weil der
+Surrogatschlüssel bei jedem Neuaufbau wechselt.
+
+**Nutzerkonten** sichern den Bestand im offenen Netz: PBKDF2-HMAC-SHA256 mit
+eigenem Salz je Konto und der Iterationszahl im Datensatz (anhebbar, ohne
+Konten zu entwerten), Vergleich in konstanter Zeit, Sperre nach Fehlversuchen,
+Selbstregistrierung nur mit Zugangscode. Die Anmeldemaske folgt dem
+Designsystem der Seite. Das erste Konto erhält die Verwaltungsrolle.
+
+Der **Schadensrechner** beantwortet die Frage, an der eine
+Einwechselentscheidung hängt: überlebt mein Pokémon diesen Treffer? Umgesetzt
+ist die Schadensformel der Hauptspiele (ab Generation V) mit der
+Rundungsreihenfolge des Spiels — zwischen den Multiplikatoren wird abgerundet,
+und genau an diesen Einzelpunkten entscheiden sich K.-o.-Grenzen. Items und
+Fähigkeiten wirken über `Dim_Item` und `Dim_Faehigkeit` mit; beide Seiten des
+Vergleichs kommen wahlweise aus der eigenen Box oder aus dem meistgespielten
+Set der Meta. Variable Stärken und Feldeffekte jenseits von Wetter und
+Schirmen bildet der Rechner bewusst nicht ab und sagt das auch.
 
 ---
 
@@ -324,7 +440,7 @@ Bezeichner, Regelkonformität der Statuspunkte. Befunde werden nach **Mangel
 (erkennbar, erfordert fachliche Entscheidung) unterschieden und in `DQ_Befund`
 protokolliert.
 
-**Nach dem Laden** (`bi.quality`) — 15 Regeln auf dem Gesamtbestand entlang der
+**Nach dem Laden** (`bi.quality`) — 20 Regeln auf dem Gesamtbestand entlang der
 Dimensionen Vollständigkeit, Konsistenz, Eindeutigkeit, Wertebereich und
 Aktualität. Der verdichtete **Qualitätsindex** dient als Qualitätstor in der CI.
 
@@ -412,11 +528,21 @@ nach der Vorhaltezeit endgültig verloren, das muss auffallen.
 
 ### Deployment
 
-Ausgelegt für **Streamlit Community Cloud**: Repository verbinden, `app.py` als
-Einstiegspunkt, `requirements.txt` wird automatisch installiert. Das Verzeichnis
-`data/` ist bewusst nicht versioniert, `archiv/` dagegen schon — die Cloud baut
-das Warehouse beim ersten Aufruf daraus auf. Es ist also nichts einzurichten:
-Repository verbinden, fertig.
+Zwei Zielumgebungen, eine Codebasis:
+
+**Streamlit Community Cloud** (öffentliche Demo): Repository verbinden,
+`app.py` als Einstiegspunkt, `requirements.txt` wird automatisch installiert.
+Das Verzeichnis `data/` ist bewusst nicht versioniert, `archiv/` dagegen schon —
+die Cloud baut das Warehouse beim ersten Aufruf daraus auf. Es ist also nichts
+einzurichten: Repository verbinden, fertig.
+
+**Jetson unter `bi.fablas.org`** (eigener Betrieb mit Nutzerdaten): systemd-
+Dienst hinter einem Cloudflare Tunnel — kein offener Port, Streamlit lauscht
+nur auf 127.0.0.1, `bi.fablas.org` hängt als Unterseite an der bestehenden
+Domain. Die Nutzerdatenbank liegt außerhalb des Repositories und wird täglich
+per `VACUUM INTO` gesichert. Der Jetson ruft keine Quelle selbst an: GitHub
+Actions sammelt, der Jetson übernimmt per `git pull` und verarbeitet ohne
+Netzzugriff aus dem Archiv. Einrichtung und Betrieb: [`deploy/jetson/`](deploy/jetson/README.md).
 
 Die Abhängigkeiten sind exakt festgelegt und auf **Python 3.10 bis 3.14** geprüft:
 für jede dieser Versionen existiert von jedem Paket ein fertiges Wheel. Ohne diese
@@ -433,13 +559,17 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 │   ├── config.py                 zentrale Konfiguration
 │   ├── typechart.py              Typen-Regelbasis
 │   ├── stats.py                  Statuspunkte, Wesen, Initiative-Szenarien
-│   ├── warehouse.py              Schema-DDL, Sichten, Verbindung
-│   ├── quality.py                15 Qualitätsregeln
+│   ├── warehouse.py              Schema-DDL, Sichten, Verbindung, Migration
+│   ├── nutzerdaten.py            Konten, PC-System, Teams (eigene Datenbank)
+│   ├── quality.py                20 Qualitätsregeln
 │   ├── etl/
-│   │   ├── extract.py            PokeAPI-Stammdaten
+│   │   ├── extract.py            PokeAPI: Pokémon, Attacken, Items, Fähigkeiten
 │   │   ├── champions.py          Champions-Strecke inkl. Archivierung
+│   │   ├── go.py                 Pokémon-GO-Strecke (pvpoke)
+│   │   ├── tcg.py                Sammelkartenspiel-Strecke (Limitless)
 │   │   ├── archivdatei.py        Determinismus-Zusage der Archivdateien
 │   │   ├── stammarchiv.py        Versionierter Auszug der Stammdaten
+│   │   ├── spielformarchiv.py    Versionierte Ablage der TCG-/GO-Rohdaten
 │   │   ├── mapping.py            Harmonisierung der Bezeichner
 │   │   ├── transform.py          Filterung · Anreicherung · Zeitdimension
 │   │   ├── load.py               Historisierung, Dimensionen, Protokoll
@@ -447,12 +577,19 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 │   ├── analytics/
 │   │   ├── kpi.py                ordinale Kennzahlen, Rangkorrelation
 │   │   ├── olap.py               Würfeloperationen
+│   │   ├── trends.py             Typen, Items, Neuzugänge, Dauerbrenner
+│   │   ├── verteilungen.py       Normal-, t-, Chi-Quadrat-Verteilung (ohne SciPy)
+│   │   ├── pruefverfahren.py     verteilungsfreie Tests, Holm-Bonferroni
+│   │   ├── hypothesen.py         der Katalog: 13 Hypothesen in 4 Bereichen
+│   │   ├── schaden.py            Schadensformel der Hauptspiele
 │   │   ├── speed.py              Speed-Tiers, Szenarien, Benchmark
 │   │   ├── threat.py             Bedrohungs- und Abdeckungsanalyse
 │   │   └── preview.py            Team-Preview-Advisor
-│   └── ui/                       acht Seitenmodule + gemeinsame Bausteine
-├── scripts/                      kopflose ETL- und Prüfläufe
-├── tests/                        178 Tests
+│   └── ui/                       vierzehn Seitenmodule, Anmeldung, Design
+├── scripts/                      kopflose ETL-, Prüf- und Hypothesenläufe
+├── deploy/jetson/                Betrieb unter bi.fablas.org (systemd, Tunnel)
+├── docs/entscheidungen.md        Warum so? Gedankengang je Use-Case
+├── tests/                        373 Tests
 └── .github/workflows/            CI und täglicher Ladelauf
 ```
 
@@ -462,20 +599,24 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 
 | Kapitel | Fundstelle |
 |---|---|
-| Problem- und Datenbeschreibung | dieses README, `bi/etl/champions.py` |
-| ETL | `bi/etl/` — je ein Modul pro Prozessschritt |
-| Datenmodellierung | `bi/warehouse.py` (DDL mit Begründungen) |
+| Problem- und Datenbeschreibung | dieses README, `docs/entscheidungen.md` |
+| Quellenwahl und Begründung | `docs/entscheidungen.md` §1, `bi/etl/{champions,go,tcg}.py` |
+| ETL | `bi/etl/` — je ein Modul pro Prozessschritt und Quelle |
+| Datenmodellierung | `bi/warehouse.py` (DDL mit Begründungen), `bi/nutzerdaten.py` |
 | Datenanalyse | `bi/analytics/` |
+| Hypothesen und Statistik | `bi/analytics/{hypothesen,pruefverfahren,verteilungen}.py` |
 | Datenvisualisierung / Dashboard | `bi/ui/` |
-| Datenqualität | `bi/quality.py` |
-| Operationalisierung | `scripts/`, `.github/workflows/` |
+| Datenqualität | `bi/quality.py` (20 Regeln) |
+| Operationalisierung | `scripts/`, `.github/workflows/`, `deploy/jetson/` |
 
 ---
 
 ## Quellen und Rechtliches
 
-- [Pokémon Champions Battle Data](https://championsbattledata.com/) — Bewegungsdaten
-- [PokeAPI](https://pokeapi.co) — Stammdaten
+- [Pokémon Champions Battle Data](https://championsbattledata.com/) — VGC-Bewegungsdaten
+- [PokeAPI](https://pokeapi.co) — Stammdaten der Hauptspiele
+- [pvpoke](https://pvpoke.com) — PvP-Ranglisten für Pokémon GO
+- [Limitless](https://limitlesstcg.com) — Turnierdaten des Sammelkartenspiels
 
 Rein akademisches Projekt ohne kommerzielle Nutzung. Es besteht keine Verbindung
 zu Nintendo, Game Freak oder The Pokémon Company.

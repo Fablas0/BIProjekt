@@ -67,8 +67,8 @@ def zeichne() -> None:
     st.caption(
         "Ein p-Wert allein genuegt nicht: bei dieser Fallzahl wird fast jeder "
         "Unterschied signifikant. Jede Pruefung traegt deshalb eine Effektstaerke, "
-        "und die Familie ist nach Holm-Bonferroni korrigiert -- zwoelf Einzeltests "
-        "zum Niveau 5 Prozent lieferten sonst mit rund 46 Prozent "
+        "und die Familie ist nach Holm-Bonferroni korrigiert -- dreizehn Einzeltests "
+        "zum Niveau 5 Prozent lieferten sonst mit rund 49 Prozent "
         "Wahrscheinlichkeit einen reinen Zufallstreffer."
     )
 
