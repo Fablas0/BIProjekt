@@ -64,6 +64,7 @@ pytestmark = pytest.mark.skipif(
 
 SEITEN = [
     "Meta-Cockpit",
+    "Trends",
     "Team-Preview-Advisor",
     "Gegner-Scouting",
     "Team-Builder",

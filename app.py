@@ -40,10 +40,12 @@ from bi.ui import (  # noqa: E402
     seite_speedtiers,
     seite_spielformen,
     seite_teambuilder,
+    seite_trends,
 )
 
 SEITEN = {
     "Meta-Cockpit": seite_cockpit.zeichne,
+    "Trends": seite_trends.zeichne,
     "Team-Preview-Advisor": seite_preview.zeichne,
     "Gegner-Scouting": seite_scouting.zeichne,
     "Team-Builder": seite_teambuilder.zeichne,
@@ -63,6 +65,7 @@ SEITEN = {
 NAVIGATION: dict[str, list[tuple[str, str]]] = {
     "Ueberblick": [
         ("Meta-Cockpit", "Rangliste, Stabilitaet und Bewegung im Format"),
+        ("Trends", "Typen, Items, Neuzugaenge und Dauerbrenner im Verlauf"),
     ],
     "Vor dem Kampf": [
         ("Team-Preview-Advisor", "Welche vier von sechs nehme ich mit?"),
