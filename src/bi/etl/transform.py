@@ -119,6 +119,117 @@ def faehigkeit_klasse(name: str) -> str:
     return "Sonstige"
 
 
+# Wirkungsklassen der Items. Die PokeAPI fuehrt eine eigene Kategorisierung,
+# die aber am Verkaufsort ausgerichtet ist ("bad-held-items", "in-a-pinch") und
+# fuer die Auswertung wenig hergibt. Massgeblich ist hier, *was das Item im
+# Kampf tut* -- danach fragt die Itemauswertung, und danach rechnet der
+# Schadensrechner.
+ITEM_KLASSEN: dict[str, str] = {
+    "choiceband": "Wahl-Item", "choicespecs": "Wahl-Item", "choicescarf": "Wahl-Item",
+    "lifeorb": "Schadensverstaerkung", "expertbelt": "Schadensverstaerkung",
+    "muscleband": "Schadensverstaerkung", "wiseglasses": "Schadensverstaerkung",
+    "metronome": "Schadensverstaerkung", "punchingglove": "Schadensverstaerkung",
+    "focussash": "Ueberleben", "focusband": "Ueberleben", "sitrusberry": "Ueberleben",
+    "leftovers": "Ueberleben", "assaultvest": "Ueberleben", "eviolite": "Ueberleben",
+    "rockyhelmet": "Ueberleben", "safetygoggles": "Ueberleben",
+    "covertcloak": "Ueberleben", "clearamulet": "Ueberleben",
+    "lightclay": "Unterstuetzung", "mentalherb": "Unterstuetzung",
+    "whiteherb": "Unterstuetzung", "ejectbutton": "Unterstuetzung",
+    "quickclaw": "Initiative", "roomservice": "Initiative", "boosterenergy": "Initiative",
+    "widelens": "Praezision", "zoomlens": "Praezision", "scopelens": "Praezision",
+}
+
+# Kategorien der PokeAPI, deren Items im Kampf getragen werden koennen. Alles
+# uebrige -- Basisbaelle, Entwicklungssteine, Questgegenstaende -- ist fuer die
+# Auswertung ohne Belang und wird gekennzeichnet, nicht verworfen: die Quelle
+# soll vollstaendig abgebildet bleiben.
+KAMPFRELEVANTE_ITEM_KATEGORIEN = frozenset({
+    "held-items", "effort-training", "bad-held-items", "training", "plates",
+    "species-specific", "type-enhancement", "choice", "in-a-pinch", "picky-healing",
+    "type-protection", "baking-only", "collectibles", "jewels", "mega-stones",
+    "memories", "other", "effort-drop", "medicine", "vitamins", "healing",
+    "status-cures", "revival", "field-effects",
+})
+
+
+def item_klasse(slug: str, kategorie: str | None) -> str:
+    """Ordnet einem Item seine Wirkung im Kampf zu.
+
+    Zuerst ueber die namentliche Liste, danach ueber die Kategorie der PokeAPI.
+    Beeren sind der Grenzfall: sie sind eine eigene Kategorie und wirken sehr
+    unterschiedlich, tragen aber alle dieselbe Bedienlogik -- sie loesen bei
+    einer Bedingung einmalig aus.
+    """
+    if slug in ITEM_KLASSEN:
+        return ITEM_KLASSEN[slug]
+    if slug.endswith("berry"):
+        return "Beere"
+    if kategorie in ("plates", "type-enhancement", "jewels"):
+        return "Typverstaerkung"
+    if kategorie in ("mega-stones", "species-specific", "memories"):
+        return "Formwandel"
+    return "Sonstige"
+
+
+def _englischer_text(eintraege: list[dict[str, Any]], feld: str) -> str | None:
+    """Zieht den englischen Kurztext aus den mehrsprachigen Eintraegen der PokeAPI.
+
+    Deutsch waere naheliegender, ist bei Items und Faehigkeiten aber nur
+    lueckenhaft gepflegt; ein fehlender Text waere schlechter als ein
+    englischer.
+    """
+    for eintrag in eintraege or []:
+        if (eintrag.get("language") or {}).get("name") == "en" and eintrag.get(feld):
+            return " ".join(str(eintrag[feld]).split())
+    return None
+
+
+def transformiere_item(nutzlast: dict[str, Any]) -> dict[str, Any]:
+    """Ueberfuehrt eine PokeAPI-Itemnutzlast in einen Dimensionssatz.
+
+    Der Schluessel ist der kompakte Bezeichner ohne Bindestriche -- dieselbe
+    Schreibweise, auf die die Champions-Anzeigenamen gebracht werden. Nur so
+    lassen sich beide Quellen verknuepfen.
+    """
+    pokeapi_slug = nutzlast.get("name", "")
+    slug = "".join(c for c in pokeapi_slug.lower() if c.isalnum())
+    kategorie = (nutzlast.get("category") or {}).get("name")
+    return {
+        "slug": slug,
+        "pokeapi_slug": pokeapi_slug,
+        "anzeigename": " ".join(w.capitalize() for w in pokeapi_slug.split("-")),
+        "kategorie": kategorie,
+        "wirkung_klasse": item_klasse(slug, kategorie),
+        "effekt_kurz": _englischer_text(nutzlast.get("effect_entries", []), "short_effect"),
+        "ist_kampfrelevant": int(kategorie in KAMPFRELEVANTE_ITEM_KATEGORIEN),
+        "fling_staerke": nutzlast.get("fling_power"),
+    }
+
+
+def transformiere_faehigkeit(nutzlast: dict[str, Any]) -> dict[str, Any]:
+    """Ueberfuehrt eine PokeAPI-Faehigkeitsnutzlast in einen Dimensionssatz."""
+    pokeapi_slug = nutzlast.get("name", "")
+    generation = (nutzlast.get("generation") or {}).get("name", "")
+    ziffern = "".join(c for c in generation if c.isdigit())
+    return {
+        "slug": "".join(c for c in pokeapi_slug.lower() if c.isalnum()),
+        "pokeapi_slug": pokeapi_slug,
+        "anzeigename": " ".join(w.capitalize() for w in pokeapi_slug.split("-")),
+        "wirkung_klasse": faehigkeit_klasse(pokeapi_slug),
+        "effekt_kurz": _englischer_text(nutzlast.get("effect_entries", []), "short_effect"),
+        "generation": _roemisch_zu_zahl(generation) if not ziffern else int(ziffern),
+    }
+
+
+# Die PokeAPI gibt Generationen als 'generation-vii' aus.
+_ROEMISCH = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5,
+             "vi": 6, "vii": 7, "viii": 8, "ix": 9}
+
+
+def _roemisch_zu_zahl(generation: str) -> int | None:
+    return _ROEMISCH.get(generation.rpartition("-")[2])
+
+
 def offensiv_profil(attack: int, sp_attack: int) -> str:
     """Bestimmt, ueber welche Angriffsart ein Pokemon Schaden austeilt."""
     if attack == 0 and sp_attack == 0:

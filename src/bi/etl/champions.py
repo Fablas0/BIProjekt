@@ -282,7 +282,11 @@ def transformiere(abzuege: list[Tagesabzug], bekannte_slugs: set[str],
                 "rang": rang_merkmal,
                 "bezeichnung": (zeile.get("name") or "").strip(),
                 "anteil": _als_anteil(zeile.get("percentage")),
-                "wesen": None, "punkte_summe": None, "attacke_schluessel": None,
+                "wesen": None, "punkte_summe": None,
+                # Verknuepfungsschluessel in die Stammdatendimensionen der
+                # Hauptspiele. Champions liefert nur den Anzeigenamen.
+                "attacke_schluessel": None, "item_schluessel": None,
+                "faehigkeit_schluessel": None,
             }
             for feld, _ in _PUNKTFELDER:
                 satz[feld] = None
@@ -290,8 +294,11 @@ def transformiere(abzuege: list[Tagesabzug], bekannte_slugs: set[str],
                 satz[f"wert_{name}"] = None
 
             if kategorie == "move":
-                # Verknuepfungsschluessel zur Attacken-Dimension.
-                satz["attacke_schluessel"] = attacken_schluessel(satz["bezeichnung"])
+                satz["attacke_schluessel"] = stammschluessel(satz["bezeichnung"])
+            elif kategorie == "held_item":
+                satz["item_schluessel"] = stammschluessel(satz["bezeichnung"])
+            elif kategorie == "ability":
+                satz["faehigkeit_schluessel"] = stammschluessel(satz["bezeichnung"])
 
             if kategorie == "nature":
                 wesen = satz["bezeichnung"].capitalize()
@@ -510,7 +517,7 @@ def lies_aus_archiv(conn: sqlite3.Connection, saison: str | None = None
 
 _MERKMAL_SPALTEN = (
     "pokemon_sk", "zeit_sk", "saison_sk", "kampfformat_sk", "kategorie", "rang",
-    "bezeichnung", "anteil", "attacke_sk", "wesen",
+    "bezeichnung", "anteil", "attacke_sk", "item_sk", "faehigkeit_sk", "wesen",
     "punkte_hp", "punkte_attack", "punkte_defense",
     "punkte_sp_attack", "punkte_sp_defense", "punkte_speed", "punkte_summe",
     "wert_hp", "wert_attack", "wert_defense",
@@ -522,7 +529,9 @@ def lade_fakten(conn: sqlite3.Connection, saetze: list[ChampionsSatz],
                 zeit_karte: dict[str, int], saison_sk: int,
                 kampfformat_karten: dict[str, int], quelle_sk: int,
                 pokemon_karte: dict[str, int], attacken_karte: dict[str, int],
-                lauf_id: int) -> tuple[int, list[Befund]]:
+                lauf_id: int, item_karte: dict[str, int] | None = None,
+                faehigkeit_karte: dict[str, int] | None = None,
+                ) -> tuple[int, list[Befund]]:
     """Schreibt Usage- und Merkmalsfakten.
 
     Das Rangperzentil wird je Tag und Format gebildet: der beste Rang erhaelt 100,
@@ -537,9 +546,13 @@ def lade_fakten(conn: sqlite3.Connection, saetze: list[ChampionsSatz],
         schluessel = (satz.datum_iso, satz.kampfformat)
         umfang[schluessel] = max(umfang.get(schluessel, 0), satz.rang)
 
+    item_karte = item_karte or {}
+    faehigkeit_karte = faehigkeit_karte or {}
+
     usage_zeilen: list[tuple[Any, ...]] = []
     merkmal_zeilen: list[tuple[Any, ...]] = []
     fehlende_attacken: set[str] = set()
+    fehlende_stammsaetze: dict[str, set[str]] = {"Items": set(), "Faehigkeiten": set()}
 
     for satz in saetze:
         pokemon_sk = pokemon_karte.get(satz.slug)
@@ -569,9 +582,21 @@ def lade_fakten(conn: sqlite3.Connection, saetze: list[ChampionsSatz],
                 if attacke_sk is None:
                     fehlende_attacken.add(merkmal["bezeichnung"])
 
+            item_sk = None
+            if merkmal.get("item_schluessel"):
+                item_sk = item_karte.get(merkmal["item_schluessel"])
+                if item_sk is None:
+                    fehlende_stammsaetze["Items"].add(merkmal["bezeichnung"])
+
+            faehigkeit_sk = None
+            if merkmal.get("faehigkeit_schluessel"):
+                faehigkeit_sk = faehigkeit_karte.get(merkmal["faehigkeit_schluessel"])
+                if faehigkeit_sk is None:
+                    fehlende_stammsaetze["Faehigkeiten"].add(merkmal["bezeichnung"])
+
             merkmal_zeilen.append((
                 *basis, merkmal["kategorie"], merkmal["rang"], merkmal["bezeichnung"],
-                merkmal["anteil"], attacke_sk, merkmal["wesen"],
+                merkmal["anteil"], attacke_sk, item_sk, faehigkeit_sk, merkmal["wesen"],
                 *(merkmal[f] for f, _ in _PUNKTFELDER), merkmal["punkte_summe"],
                 *(merkmal[f"wert_{name}"] for name in STATUSWERTE),
             ))
@@ -583,6 +608,19 @@ def lade_fakten(conn: sqlite3.Connection, saetze: list[ChampionsSatz],
             "Referenzielle Integritaet",
             f"{len(fehlende_attacken)} Attacken ohne Eintrag in der Attacken-Dimension. "
             f"Ihre Typangabe fehlt damit fuer die Matchup-Bewertung. Beispiele: {beispiele}",
+            klasse="Mangel 2. Klasse", dimension="Referenzielle Integritaet",
+            verworfen=False))
+
+    for entitaet, fehlend in fehlende_stammsaetze.items():
+        if not fehlend:
+            continue
+        beispiele = ", ".join(sorted(fehlend)[:5])
+        befunde.append(Befund(
+            "Fact_Champions_Merkmal", f"{entitaet}-Verknuepfung",
+            "Referenzielle Integritaet",
+            f"{len(fehlend)} {entitaet} ohne Eintrag in der zugehoerigen Dimension. "
+            f"Ihre Wirkung fehlt damit fuer Auswertung und Schadensrechnung. "
+            f"Beispiele: {beispiele}",
             klasse="Mangel 2. Klasse", dimension="Referenzielle Integritaet",
             verworfen=False))
 
@@ -614,14 +652,22 @@ def lade_fakten(conn: sqlite3.Connection, saetze: list[ChampionsSatz],
     return len(usage_zeilen), befunde
 
 
-def attacken_schluessel(anzeigename: str) -> str:
-    """Vereinheitlicht einen Attackennamen zum Verknuepfungsschluessel.
+def stammschluessel(anzeigename: str) -> str:
+    """Vereinheitlicht einen Anzeigenamen zum Verknuepfungsschluessel.
 
-    Champions liefert ``"Dragon Claw"``, die Attacken-Dimension fuehrt
-    ``"dragonclaw"``. Beide Seiten werden auf dieselbe kompakte Schreibweise
-    gebracht.
+    Champions liefert ``"Dragon Claw"``, ``"Focus Sash"``, ``"Flash Fire"``;
+    die Dimensionen der Hauptspiele fuehren ``"dragonclaw"``, ``"focussash"``,
+    ``"flashfire"``. Beide Seiten werden auf dieselbe kompakte Schreibweise
+    gebracht -- ohne Bindestriche, Leerzeichen und Sonderzeichen, weil die
+    Quellen sich genau darin unterscheiden (``"Never-Melt Ice"`` gegen
+    ``"never-melt-ice"``).
     """
     return "".join(c for c in anzeigename.lower() if c.isalnum())
+
+
+# Bisheriger Name der Funktion. Sie hiess nach der Attacken-Dimension, gilt
+# aber inzwischen fuer drei Dimensionen.
+attacken_schluessel = stammschluessel
 
 
 # --------------------------------------------------------------------------
@@ -704,33 +750,67 @@ def laden(conn: sqlite3.Connection, max_tage: int | None = None,
         # ueber das Netz. Ein Ueberspringen liess ``Dim_Attacke`` auf einem
         # frischen Rechner leer und damit jede Matchup-Bewertung ins Leere
         # laufen. Nachgeladen wird ohnehin nur Fehlendes.
-        fortschritt(0.78, "Ergaenze fehlende Attacken-Stammdaten ...")
-        benoetigt = {
-            m["attacke_schluessel"] for s in saetze for m in s.merkmale
-            if m["attacke_schluessel"]
-        }
-        try:
-            pipeline.attacken_ergaenzen(conn, benoetigt)
-        except Exception as fehler:  # noqa: BLE001 -- Netzfehler jeder Art
-            # Ohne Attacken bleiben die Nutzungsfakten gueltig; nur die
-            # Matchup-Bewertung ist eingeschraenkt. Das ist ein Qualitaets-
-            # befund, kein Grund, den ganzen Lauf zu verwerfen.
-            befunde.append(Befund(
-                "Dim_Attacke", "PokeAPI", "Verfuegbarkeit der Stammdatenquelle",
-                f"Attacken-Stammdaten konnten nicht nachgeladen werden: {fehler}. "
-                "Die Matchup-Bewertung bleibt bis zum naechsten Lauf unvollstaendig.",
-                klasse="Mangel 2. Klasse", dimension="Vollstaendigkeit",
-                verworfen=False))
+        # Die Stammdaten der Hauptspiele tragen erst die Bedeutung heran:
+        # Dim_Attacke Typ, Kategorie und Basisschaden, Dim_Item und
+        # Dim_Faehigkeit die Wirkung im Kampf. Champions liefert zu allen drei
+        # nur den Anzeigenamen -- ohne diesen Schritt bliebe die Auswertung
+        # eine Auszaehlung von Zeichenketten.
+        #
+        # Das gilt auch beim Neuaufbau aus dem Archiv: ``aus_archiv`` heisst
+        # "die Tagesstaende nicht erneut bei Champions abrufen", nicht "keine
+        # Stammdaten laden". Ein Ueberspringen liess ``Dim_Attacke`` auf einem
+        # frischen Rechner leer und damit jede Matchup-Bewertung ins Leere
+        # laufen. Nachgeladen wird ohnehin nur Fehlendes.
+        fortschritt(0.78, "Ergaenze fehlende Stammdaten der Hauptspiele ...")
+        benoetigt: dict[str, set[str]] = {"attacke": set(), "item": set(),
+                                          "faehigkeit": set()}
+        for eintrag in saetze:
+            for merkmal in eintrag.merkmale:
+                for art in benoetigt:
+                    schluessel = merkmal.get(f"{art}_schluessel")
+                    if schluessel:
+                        benoetigt[art].add(schluessel)
+
+        nachladen = (
+            ("attacke", "Dim_Attacke", pipeline.attacken_ergaenzen),
+            ("item", "Dim_Item", pipeline.items_ergaenzen),
+            ("faehigkeit", "Dim_Faehigkeit", pipeline.faehigkeiten_ergaenzen),
+        )
+        for art, tabelle, ergaenze in nachladen:
+            try:
+                ergaenze(conn, benoetigt[art])
+            except Exception as fehler:  # noqa: BLE001 -- Netzfehler jeder Art
+                # Ohne diese Stammdaten bleiben die Nutzungsfakten gueltig; nur
+                # die Anreicherung ist eingeschraenkt. Das ist ein
+                # Qualitaetsbefund, kein Grund, den ganzen Lauf zu verwerfen --
+                # ein verpasster Tagesstand waere endgueltig verloren, eine
+                # fehlende Attackenbeschreibung nicht.
+                befunde.append(Befund(
+                    tabelle, "PokeAPI", "Verfuegbarkeit der Stammdatenquelle",
+                    f"Stammdaten fuer {tabelle} konnten nicht nachgeladen werden: "
+                    f"{fehler}. Die Anreicherung bleibt bis zum naechsten Lauf "
+                    f"unvollstaendig.",
+                    klasse="Mangel 2. Klasse", dimension="Vollstaendigkeit",
+                    verworfen=False))
 
         attacken_karte = {
             z["slug"]: z["attacke_sk"]
             for z in conn.execute("SELECT slug, attacke_sk FROM Dim_Attacke")
+        }
+        item_karte = {
+            z["slug"]: z["item_sk"]
+            for z in conn.execute("SELECT slug, item_sk FROM Dim_Item")
+        }
+        faehigkeit_karte = {
+            z["slug"]: z["faehigkeit_sk"]
+            for z in conn.execute("SELECT slug, faehigkeit_sk FROM Dim_Faehigkeit")
         }
 
         fortschritt(0.85, "Schreibe Champions-Fakten ...")
         geladen, lade_befunde = lade_fakten(
             conn, saetze, zeit_karte, saison_sk, kampfformat_karten, quelle_sk,
             pokemon_karte, attacken_karte, lauf_id,
+            item_karte=item_karte, faehigkeit_karte=faehigkeit_karte,
         )
         befunde.extend(lade_befunde)
 

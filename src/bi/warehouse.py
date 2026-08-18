@@ -13,7 +13,9 @@ Aufbau in drei Schichten entsprechend der klassischen DWH-Architektur:
 
 Quellsysteme
 ------------
-* **PokeAPI** -- Stammdaten: Typen, Basiswerte, Attackeneigenschaften.
+* **PokeAPI** -- Stammdaten der Hauptspiele: Typen, Basiswerte, Attacken-,
+  Item- und Faehigkeitseigenschaften. Champions liefert zu Items und
+  Faehigkeiten nur den Namen; ihre Wirkung steht in den Hauptspielen.
 * **Pokemon Champions** -- Bewegungsdaten der offiziellen Wettkampfplattform:
   taegliche Nutzungsraenge sowie Attacken, Items, Faehigkeiten, Wesen und
   Statuspunkte je Pokemon, getrennt nach Einzel- und Doppelkampf.
@@ -201,6 +203,36 @@ CREATE TABLE IF NOT EXISTS Dim_Attacke (
     taktik_klasse TEXT NOT NULL DEFAULT 'Offensiv'  -- Anreicherung fuer den Strategie-Radar
 );
 
+-- Item-Dimension. Quelle sind die Hauptspiele ueber die PokeAPI: Champions
+-- liefert nur den Anzeigenamen des getragenen Items, nicht seine Wirkung.
+--
+-- Ohne diese Dimension bliebe die Itemauswertung eine Zeichenkette. Erst
+-- Kategorie und Wirkungsklasse machen aus "Focus Sash" die Aussage "ein Item,
+-- das einen Treffer ueberleben laesst" -- und erst damit ist der Schadens-
+-- rechner in der Lage, das Item zu verrechnen.
+CREATE TABLE IF NOT EXISTS Dim_Item (
+    item_sk        INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug           TEXT NOT NULL UNIQUE,    -- kompakt, z.B. 'focussash'
+    pokeapi_slug   TEXT,                    -- 'focus-sash'
+    anzeigename    TEXT NOT NULL,
+    kategorie      TEXT,                    -- Kategorie der PokeAPI
+    wirkung_klasse TEXT NOT NULL DEFAULT 'Sonstige',  -- Anreicherung
+    effekt_kurz    TEXT,
+    ist_kampfrelevant INTEGER NOT NULL DEFAULT 1,
+    fling_staerke  INTEGER
+);
+
+-- Faehigkeiten-Dimension, ebenfalls aus den Hauptspielen.
+CREATE TABLE IF NOT EXISTS Dim_Faehigkeit (
+    faehigkeit_sk  INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug           TEXT NOT NULL UNIQUE,    -- kompakt, z.B. 'intimidate'
+    pokeapi_slug   TEXT,
+    anzeigename    TEXT NOT NULL,
+    wirkung_klasse TEXT NOT NULL DEFAULT 'Sonstige',  -- Anreicherung
+    effekt_kurz    TEXT,
+    generation     INTEGER
+);
+
 -- =====================================================================
 -- SCHICHT 2: CORE DATA WAREHOUSE -- FAKTEN
 -- =====================================================================
@@ -244,7 +276,9 @@ CREATE TABLE IF NOT EXISTS Fact_Champions_Merkmal (
     rang           INTEGER NOT NULL,
     bezeichnung    TEXT    NOT NULL,
     anteil         REAL,                    -- Kennzahl in %; bei Teampartnern leer
-    attacke_sk     INTEGER REFERENCES Dim_Attacke (attacke_sk),  -- nur bei kategorie='move'
+    attacke_sk     INTEGER REFERENCES Dim_Attacke (attacke_sk),        -- kategorie='move'
+    item_sk        INTEGER REFERENCES Dim_Item (item_sk),              -- kategorie='held_item'
+    faehigkeit_sk  INTEGER REFERENCES Dim_Faehigkeit (faehigkeit_sk),  -- kategorie='ability'
     -- Nur bei kategorie = 'spread' belegt
     wesen             TEXT,
     punkte_hp         INTEGER,
@@ -358,13 +392,18 @@ SELECT
     m.wert_hp, m.wert_attack, m.wert_defense,
     m.wert_sp_attack, m.wert_sp_defense, m.wert_speed,
     a.typ AS attacke_typ, a.kategorie AS attacke_kategorie,
-    a.basisschaden, a.prioritaet, a.zielbereich, a.taktik_klasse
+    a.basisschaden, a.prioritaet, a.zielbereich, a.taktik_klasse,
+    i.wirkung_klasse AS item_klasse, i.kategorie AS item_kategorie,
+    i.effekt_kurz AS item_effekt,
+    fa.wirkung_klasse AS faehigkeit_klasse, fa.effekt_kurz AS faehigkeit_effekt
 FROM Fact_Champions_Merkmal m
 JOIN Dim_Pokemon     p ON p.pokemon_sk     = m.pokemon_sk
 JOIN Dim_Zeit        z ON z.zeit_sk        = m.zeit_sk
 JOIN Dim_Saison      s ON s.saison_sk      = m.saison_sk
 JOIN Dim_Kampfformat k ON k.kampfformat_sk = m.kampfformat_sk
-LEFT JOIN Dim_Attacke a ON a.attacke_sk    = m.attacke_sk;
+LEFT JOIN Dim_Attacke    a  ON a.attacke_sk    = m.attacke_sk
+LEFT JOIN Dim_Item       i  ON i.item_sk       = m.item_sk
+LEFT JOIN Dim_Faehigkeit fa ON fa.faehigkeit_sk = m.faehigkeit_sk;
 
 DROP VIEW IF EXISTS V_Merkmal_Aktuell;
 CREATE VIEW V_Merkmal_Aktuell AS
@@ -421,9 +460,49 @@ def verbindung(pfad: Path | str | None = None) -> Verbindung:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.executescript(SCHEMA_DDL)
+    _spalten_nachziehen(conn)
+    # Die Sichten entstehen bei jedem Verbindungsaufbau neu und beruecksichtigen
+    # damit nachgezogene Spalten sofort.
     conn.executescript(SICHTEN_DDL)
     conn.commit()
     return conn
+
+
+# Spalten, die spaeter zu einer bestehenden Tabelle hinzugekommen sind.
+# ``CREATE TABLE IF NOT EXISTS`` legt eine vorhandene Tabelle nicht neu an --
+# eine bestehende Datenbank bekaeme die neuen Spalten sonst nie. Ein
+# Loeschen und Neuanlegen scheidet aus: ``Archiv_Champions`` haelt Tagesstaende,
+# die die Quelle nicht mehr fuehrt.
+NACHGEREICHTE_SPALTEN: dict[str, dict[str, str]] = {
+    "Fact_Champions_Merkmal": {
+        "item_sk": "INTEGER REFERENCES Dim_Item (item_sk)",
+        "faehigkeit_sk": "INTEGER REFERENCES Dim_Faehigkeit (faehigkeit_sk)",
+    },
+}
+
+
+def _spalten_nachziehen(conn: sqlite3.Connection) -> list[str]:
+    """Ergaenzt fehlende Spalten in bereits bestehenden Tabellen.
+
+    Bewusst schlicht gehalten: es wird ausschliesslich hinzugefuegt, nie
+    umbenannt oder entfernt. Damit bleibt der Schritt gefahrlos wiederholbar
+    und kann bei jedem Verbindungsaufbau laufen. Fuer mehr braeuchte es ein
+    echtes Migrationswerkzeug -- fuer ein Projekt mit einer Datenbankdatei,
+    die sich jederzeit aus dem Archiv neu aufbauen laesst, waere das
+    unverhaeltnismaessig.
+    """
+    ergaenzt: list[str] = []
+    for tabelle, spalten in NACHGEREICHTE_SPALTEN.items():
+        vorhanden = {z[1] for z in conn.execute(f"PRAGMA table_info({tabelle})")}
+        if not vorhanden:
+            continue  # Tabelle wurde soeben angelegt und ist vollstaendig.
+        for spalte, typ in spalten.items():
+            if spalte not in vorhanden:
+                conn.execute(f"ALTER TABLE {tabelle} ADD COLUMN {spalte} {typ}")  # noqa: S608
+                ergaenzt.append(f"{tabelle}.{spalte}")
+    if ergaenzt:
+        conn.commit()
+    return ergaenzt
 
 
 def ist_befuellt(conn: sqlite3.Connection) -> bool:
@@ -464,7 +543,7 @@ def zuruecksetzen(conn: sqlite3.Connection, nur_fakten: bool = False,
     Das Verwerfen muss deshalb ausdruecklich verlangt werden.
     """
     fakten = ["Fact_Champions_Usage", "Fact_Champions_Merkmal"]
-    stamm = ["Dim_Pokemon", "Dim_Zeit", "Dim_Attacke",
+    stamm = ["Dim_Pokemon", "Dim_Zeit", "Dim_Attacke", "Dim_Item", "Dim_Faehigkeit",
              "Dim_Saison", "Dim_Kampfformat", "Dim_Quelle"]
     meta = ["Stage_Pokeapi", "DQ_Befund", "ETL_Lauf"]
 

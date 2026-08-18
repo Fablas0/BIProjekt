@@ -305,3 +305,13 @@ def lade_saison(conn: sqlite3.Connection, schluessel: str, bezeichnung: str,
 def lade_attacken_dimension(conn: sqlite3.Connection, saetze: list[dict[str, Any]]) -> None:
     """Laedt die Attacken-Dimension."""
     _sichere_dimension(conn, "Dim_Attacke", "slug", saetze)
+
+
+def lade_item_dimension(conn: sqlite3.Connection, saetze: list[dict[str, Any]]) -> None:
+    """Laedt die Item-Dimension aus den Stammdaten der Hauptspiele."""
+    _sichere_dimension(conn, "Dim_Item", "slug", saetze)
+
+
+def lade_faehigkeit_dimension(conn: sqlite3.Connection, saetze: list[dict[str, Any]]) -> None:
+    """Laedt die Faehigkeiten-Dimension aus den Stammdaten der Hauptspiele."""
+    _sichere_dimension(conn, "Dim_Faehigkeit", "slug", saetze)

@@ -4,6 +4,10 @@ Zwei Teilprozesse mit unterschiedlicher Ladefrequenz:
 
 * :func:`stammdaten_laden` -- PokeAPI. Aendert sich nur bei einer neuen
   Spielgeneration oder einer Balance-Anpassung, laeuft also selten.
+* :func:`attacken_ergaenzen`, :func:`items_ergaenzen`,
+  :func:`faehigkeiten_ergaenzen` -- bedarfsgesteuertes Nachladen der
+  Stammdaten aus den Hauptspielen. Champions nennt Attacken, Items und
+  Faehigkeiten nur beim Namen; ihre Eigenschaften stehen in der PokeAPI.
 * :func:`bi.etl.champions.laden` -- Pokemon Champions. Taeglich neue Daten;
   weil die Quelle nur rund zwei Wochen vorhaelt, sollte der Lauf regelmaessig
   erfolgen, damit keine Tage verloren gehen.
@@ -19,7 +23,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from . import extract, load
-from .transform import Befund, transformiere_attacke, transformiere_pokemon
+from .transform import (
+    Befund,
+    transformiere_attacke,
+    transformiere_faehigkeit,
+    transformiere_item,
+    transformiere_pokemon,
+)
 
 Fortschritt = Callable[[float, str], None]
 
@@ -96,6 +106,32 @@ def stammdaten_laden(conn: sqlite3.Connection, fortschritt: Fortschritt = _still
         return LaufErgebnis(lauf_id=lauf_id, erfolgreich=False, meldung=str(fehler))
 
 
+def _ergaenze_stammsaetze(conn: sqlite3.Connection, tabelle: str, ressource: str,
+                          kompakte_namen: set[str], transformation,
+                          lade, hole, fortschritt: Fortschritt = _still) -> int:
+    """Gemeinsames Nachladeverfahren fuer Attacken, Items und Faehigkeiten.
+
+    Alle drei folgen demselben Muster: Champions nennt nur den Anzeigenamen,
+    die Eigenschaften stehen in den Hauptspielen. Geladen wird ausschliesslich,
+    was in den Bewegungsdaten vorkommt und noch fehlt -- ein vollstaendiger
+    Abzug waere ein Vielfaches an Aufrufen fuer Daten, die nie jemand ansieht.
+    """
+    vorhanden = {z["slug"] for z in conn.execute(f"SELECT slug FROM {tabelle}")}  # noqa: S608
+    fehlend = kompakte_namen - vorhanden
+    if not fehlend:
+        return 0
+
+    with extract.sitzung() as s:
+        verzeichnis = extract.verzeichnis_kompakt(s, ressource)
+        aufloesung = {k: verzeichnis[k] for k in fehlend if k in verzeichnis}
+        if not aufloesung:
+            return 0
+        nutzlasten = hole(s, aufloesung.values(), fortschritt)
+
+    lade(conn, [transformation(n) for n in nutzlasten])
+    return len(nutzlasten)
+
+
 def attacken_ergaenzen(conn: sqlite3.Connection, kompakte_namen: set[str],
                        fortschritt: Fortschritt = _still) -> int:
     """Laedt Attacken nach, die noch nicht in der Dimension stehen.
@@ -106,17 +142,27 @@ def attacken_ergaenzen(conn: sqlite3.Connection, kompakte_namen: set[str],
 
     Rueckgabe: Anzahl neu geladener Attacken.
     """
-    vorhanden = {z["slug"] for z in conn.execute("SELECT slug FROM Dim_Attacke")}
-    fehlend = kompakte_namen - vorhanden
-    if not fehlend:
-        return 0
+    return _ergaenze_stammsaetze(
+        conn, "Dim_Attacke", "move", kompakte_namen, transformiere_attacke,
+        load.lade_attacken_dimension, extract.hole_attacken, fortschritt)
 
-    with extract.sitzung() as s:
-        verzeichnis = extract.verzeichnis_kompakt(s, "move")
-        aufloesung = {k: verzeichnis[k] for k in fehlend if k in verzeichnis}
-        if not aufloesung:
-            return 0
-        nutzlasten = extract.hole_attacken(s, aufloesung.values(), fortschritt)
 
-    load.lade_attacken_dimension(conn, [transformiere_attacke(n) for n in nutzlasten])
-    return len(nutzlasten)
+def items_ergaenzen(conn: sqlite3.Connection, kompakte_namen: set[str],
+                    fortschritt: Fortschritt = _still) -> int:
+    """Laedt Items nach, die noch nicht in der Dimension stehen.
+
+    Champions liefert zum getragenen Item nur den Anzeigenamen. Wirkung und
+    Kategorie -- und damit die Grundlage jeder Itemauswertung und des
+    Schadensrechners -- stammen aus den Hauptspielen ueber die PokeAPI.
+    """
+    return _ergaenze_stammsaetze(
+        conn, "Dim_Item", "item", kompakte_namen, transformiere_item,
+        load.lade_item_dimension, extract.hole_items, fortschritt)
+
+
+def faehigkeiten_ergaenzen(conn: sqlite3.Connection, kompakte_namen: set[str],
+                           fortschritt: Fortschritt = _still) -> int:
+    """Laedt Faehigkeiten nach, die noch nicht in der Dimension stehen."""
+    return _ergaenze_stammsaetze(
+        conn, "Dim_Faehigkeit", "ability", kompakte_namen, transformiere_faehigkeit,
+        load.lade_faehigkeit_dimension, extract.hole_faehigkeiten, fortschritt)

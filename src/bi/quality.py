@@ -270,6 +270,49 @@ def regel_attackenabdeckung(conn: sqlite3.Connection) -> Pruefergebnis:
     )
 
 
+def _abdeckung(conn: sqlite3.Connection, kategorie: str, spalte: str,
+               regel: str, zweck: str) -> Pruefergebnis:
+    """Gemeinsame Pruefung der Verknuepfung eines Merkmals mit seiner Dimension."""
+    gesamt = _zaehle(
+        conn, "SELECT COUNT(*) FROM Fact_Champions_Merkmal WHERE kategorie = ?", kategorie)
+    if gesamt == 0:
+        return Pruefergebnis(regel, "Vollstaendigkeit", True,
+                             f"Keine Fakten der Kategorie {kategorie} geladen.", 0)
+
+    ohne = _zaehle(
+        conn,
+        f"SELECT COUNT(*) FROM Fact_Champions_Merkmal "  # noqa: S608
+        f"WHERE kategorie = ? AND {spalte} IS NULL", kategorie)
+    quote = 100 * (gesamt - ohne) / gesamt
+    return Pruefergebnis(
+        regel, "Vollstaendigkeit", quote >= 95.0,
+        f"{quote:.1f}% der {gesamt} Fakten sind mit ihrer Dimension verknuepft "
+        f"und damit {zweck}.",
+        ohne,
+    )
+
+
+def regel_itemabdeckung(conn: sqlite3.Connection) -> Pruefergebnis:
+    """Getragene Items muessen mit den Stammdaten der Hauptspiele verknuepft sein.
+
+    Champions liefert nur den Namen des Items. Ohne die Verknuepfung waere die
+    Itemauswertung eine Auszaehlung von Zeichenketten, und der Schadensrechner
+    koennte einen Wahlschal nicht von einem Fokusgurt unterscheiden.
+    """
+    return _abdeckung(
+        conn, "held_item", "item_sk",
+        "Verknuepfung der Items mit ihren Stammdaten",
+        "nach ihrer Wirkung auswertbar")
+
+
+def regel_faehigkeitsabdeckung(conn: sqlite3.Connection) -> Pruefergebnis:
+    """Gespielte Faehigkeiten muessen mit den Stammdaten verknuepft sein."""
+    return _abdeckung(
+        conn, "ability", "faehigkeit_sk",
+        "Verknuepfung der Faehigkeiten mit ihren Stammdaten",
+        "nach ihrer Wirkungsklasse auswertbar")
+
+
 # --------------------------------------------------------------------------
 # Wertebereich
 # --------------------------------------------------------------------------
@@ -399,6 +442,8 @@ ALLE_REGELN = (
     regel_beide_formate,
     regel_stammdatenabdeckung,
     regel_attackenabdeckung,
+    regel_itemabdeckung,
+    regel_faehigkeitsabdeckung,
     regel_statuspunkte_budget,
     regel_rangperzentil_wertebereich,
     regel_merkmalsanteile,

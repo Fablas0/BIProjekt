@@ -1,7 +1,11 @@
 """EXTRACT -- Datenabzug der Stammdaten aus der PokeAPI.
 
-Die PokeAPI liefert Typen, Basiswerte und Attackeneigenschaften. Sie ist sauber
-strukturiert, aber nur einzelsatzweise abrufbar: rund 1350 Pokemon bedeuten
+Die PokeAPI ist die Quelle fuer alles, was aus den **Hauptspielen** stammt:
+Pokemon mit Typen und Basiswerten, Attacken, Items und Faehigkeiten. Pokemon
+Champions liefert zu Items und Faehigkeiten ausschliesslich den Anzeigenamen --
+ihre Wirkung, Kategorie und Staerke existieren nur in den Hauptspielen.
+
+Sie ist sauber strukturiert, aber nur einzelsatzweise abrufbar: rund 1350 Pokemon bedeuten
 ebenso viele Aufrufe. Der Abzug wird daher parallelisiert und ueber eine
 wiederverwendete Sitzung abgewickelt.
 
@@ -163,4 +167,26 @@ def hole_attacken(s: requests.Session, slugs: Iterable[str],
     """
     urls = [f"{POKEAPI_BASIS}/move/{slug}" for slug in sorted(set(slugs))]
     ergebnisse = _parallel(s, urls, fortschritt, "Lade Attacken-Stammdaten")
+    return [e for e in ergebnisse if e is not None]
+
+
+def hole_items(s: requests.Session, slugs: Iterable[str],
+               fortschritt: Fortschritt = _kein_fortschritt) -> list[dict[str, Any]]:
+    """Laedt Detaildaten zu den uebergebenen Items.
+
+    Wie bei den Attacken bedarfsgesteuert: geladen wird, was in den
+    Bewegungsdaten tatsaechlich vorkommt. Von den rund 2100 Items der PokeAPI
+    sind das etwa 60 -- der Rest sind Basisbaelle, Entwicklungssteine und
+    Questgegenstaende ohne Kampfbezug.
+    """
+    urls = [f"{POKEAPI_BASIS}/item/{slug}" for slug in sorted(set(slugs))]
+    ergebnisse = _parallel(s, urls, fortschritt, "Lade Item-Stammdaten")
+    return [e for e in ergebnisse if e is not None]
+
+
+def hole_faehigkeiten(s: requests.Session, slugs: Iterable[str],
+                      fortschritt: Fortschritt = _kein_fortschritt) -> list[dict[str, Any]]:
+    """Laedt Detaildaten zu den uebergebenen Faehigkeiten."""
+    urls = [f"{POKEAPI_BASIS}/ability/{slug}" for slug in sorted(set(slugs))]
+    ergebnisse = _parallel(s, urls, fortschritt, "Lade Faehigkeiten-Stammdaten")
     return [e for e in ergebnisse if e is not None]
