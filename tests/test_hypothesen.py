@@ -139,8 +139,9 @@ def test_katalog_ist_vollstaendig_beschrieben() -> None:
     """Jede Hypothese muss vor der Auswertung vollstaendig formuliert sein."""
     assert hypothesen.KATALOG, "Der Katalog ist leer."
     for hypothese in hypothesen.KATALOG:
-        for feld in ("titel", "nullhypothese", "alternativhypothese", "begruendung",
-                     "verfahren", "datenbasis", "bei_verwerfung", "bei_beibehaltung"):
+        for feld in ("titel", "anwendungsfall", "nullhypothese",
+                     "alternativhypothese", "begruendung", "verfahren",
+                     "datenbasis", "bei_verwerfung", "bei_beibehaltung"):
             wert = getattr(hypothese, feld)
             assert wert and len(wert) > 20, f"{hypothese.schluessel}: {feld} fehlt"
 
@@ -148,6 +149,38 @@ def test_katalog_ist_vollstaendig_beschrieben() -> None:
 def test_schluessel_sind_eindeutig() -> None:
     schluessel = [h.schluessel for h in hypothesen.KATALOG]
     assert len(schluessel) == len(set(schluessel))
+
+
+def test_titel_ist_eine_frage() -> None:
+    """Der Titel traegt die Frage, die die Hypothese beantwortet.
+
+    Aussagesaetze wie "Flaechenattacken sind ein Merkmal des Doppelkampfs"
+    lasen sich wie Banalitaeten -- der Nutzen der Pruefung blieb unsichtbar.
+    Eine Frage zwingt dazu, den offenen Punkt in den Titel zu heben; was am
+    Ergebnis haengt, steht daneben im Anwendungsfall.
+    """
+    for hypothese in hypothesen.KATALOG:
+        assert hypothese.titel.rstrip().endswith("?"), (
+            f"{hypothese.schluessel}: Der Titel '{hypothese.titel}' ist keine "
+            "Frage. Die Aussage gehoert in bei_verwerfung/bei_beibehaltung, "
+            "der Nutzen in den Anwendungsfall.")
+
+
+def test_art_ist_ausgewiesen() -> None:
+    """Jede Hypothese ist Erkenntnisfrage oder Datenprobe -- nichts Drittes.
+
+    Der Katalog muss beide Arten enthalten: ohne Datenproben fehlte der
+    Known-Answer-Test der Datenkette, ohne Erkenntnisfragen der Ertrag.
+    """
+    arten = {h.art for h in hypothesen.KATALOG}
+    assert arten == {hypothesen.ART_ERKENNTNIS, hypothesen.ART_DATENPROBE}
+    for hypothese in hypothesen.KATALOG:
+        if hypothese.art != hypothesen.ART_DATENPROBE:
+            continue
+        text = (hypothese.anwendungsfall + hypothese.begruendung).lower()
+        assert any(wort in text for wort in ("datenkette", "anreicherung", "etl")), (
+            f"{hypothese.schluessel}: Eine Datenprobe muss benennen, "
+            "welchen Teil der Verarbeitung sie absichert.")
 
 
 def test_nullhypothese_ist_als_verneinung_formuliert() -> None:

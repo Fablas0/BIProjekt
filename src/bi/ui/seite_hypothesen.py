@@ -50,10 +50,14 @@ def zeichne() -> None:
         hinweis_leere_datenbank()
         return
 
+    datenproben = sum(1 for e in ergebnis.ergebnisse
+                      if e.hypothese.art == hypothesen.ART_DATENPROBE)
+
     kacheln = st.columns(4)
     with kacheln[0]:
         st.markdown(kennzahl_kachel("Hypothesen", str(len(ergebnis.ergebnisse)),
-                                    "im Katalog"), unsafe_allow_html=True)
+                                    f"im Katalog, davon {datenproben} Datenproben"),
+                    unsafe_allow_html=True)
     with kacheln[1]:
         st.markdown(kennzahl_kachel("H0 verworfen", str(ergebnis.verworfen),
                                     "Effekt statistisch belegt",
@@ -73,6 +77,16 @@ def zeichne() -> None:
         "und die Familie ist nach Holm-Bonferroni korrigiert -- dreizehn Einzeltests "
         "zum Niveau 5 Prozent lieferten sonst mit rund 49 Prozent "
         "Wahrscheinlichkeit einen reinen Zufallstreffer."
+    )
+    st.markdown(
+        "Der Katalog enthaelt zwei Arten von Hypothesen, und der Unterschied "
+        "steht an jeder Pruefung: **Erkenntnisfragen** sind ergebnisoffen -- die "
+        "Antwort aendert eine Entscheidung beim Teambau, im Scouting oder im "
+        "Betrieb. **Datenproben** klingen dagegen absichtlich nach einer "
+        "Selbstverstaendlichkeit: ihr Soll-Ergebnis steht durch die Spielregeln "
+        "fest, und genau das macht sie zum Pruefstein der eigenen Verarbeitung. "
+        "Reproduziert die Datenkette die bekannte Antwort nicht, ist sie defekt "
+        "-- und erst ihr Bestehen macht die uebrigen Auswertungen glaubwuerdig."
     )
 
     _effektdiagramm(ergebnis)
@@ -112,13 +126,23 @@ def _effektdiagramm(ergebnis: hypothesen.Katalogergebnis) -> None:
 def _hypothese(e: hypothesen.HypothesenErgebnis) -> None:
     h = e.hypothese
     farbe = STATUS_FARBEN.get(e.status, design.GRAU_MITTE)
-    with st.expander(f"{h.schluessel} · {h.titel} — {e.status}"):
+    probe = h.art == hypothesen.ART_DATENPROBE
+    with st.expander(f"{h.schluessel} · {h.titel} — {e.status}"
+                     + (" · Datenprobe" if probe else "")):
+        if probe:
+            st.caption(
+                "Datenprobe: Das Soll-Ergebnis dieser Pruefung steht durch die "
+                "Spielregeln fest. Geprueft wird nicht das Spiel, sondern ob die "
+                "eigene Datenkette die bekannte Antwort reproduziert."
+            )
         st.markdown(
             f"<div style='border-left:3px solid {farbe};padding-left:12px;'>"
             f"<b>H0:</b> {h.nullhypothese}<br>"
             f"<b>H1:</b> {h.alternativhypothese}</div>",
             unsafe_allow_html=True)
 
+        if h.anwendungsfall:
+            st.markdown(f"**Wozu das Ergebnis dient:** {h.anwendungsfall}")
         st.markdown(f"**Warum diese Frage:** {h.begruendung}")
         st.markdown(f"**Verfahren:** {h.verfahren}")
         st.markdown(f"**Datenbasis:** {h.datenbasis}")

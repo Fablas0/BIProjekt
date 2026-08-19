@@ -17,12 +17,34 @@ Aufbau einer Hypothese
 ======================  ==============================================
 Feld                    Inhalt
 ======================  ==============================================
+``titel``               die Frage, die die Hypothese beantwortet
+``art``                 Erkenntnis oder Datenprobe (siehe unten)
+``anwendungsfall``      welche Entscheidung am Ergebnis haengt
 ``nullhypothese``       die Aussage, die widerlegt werden soll
 ``alternativhypothese`` was gilt, wenn die Nullhypothese faellt
 ``begruendung``         warum die Frage fachlich zaehlt
 ``verfahren``           welches Verfahren und warum dieses
 ``datenbasis``          welche Quelle, welche Tabelle, welcher Umfang
 ======================  ==============================================
+
+Zwei Arten von Hypothesen
+-------------------------
+Der Katalog enthaelt zwei Arten, und der Unterschied gehoert ausgewiesen,
+weil sie sonst gegeneinander abfaerben:
+
+* **Erkenntnis** -- das Ergebnis ist offen; die Antwort aendert eine
+  Entscheidung beim Teambau, im Scouting oder im Betrieb.
+* **Datenprobe** -- das erwartete Ergebnis steht durch die Spielregeln
+  fest ("Flaechenattacken gehoeren in den Doppelkampf"). Genau deshalb
+  taugt die Pruefung als Known-Answer-Test: bleibt der zwingende Effekt
+  aus, liegt der Fehler in der eigenen Datenkette, nicht im Spiel. Eine
+  Datenprobe, die anschlaegt, ist der Beleg, dass die uebrigen
+  Auswertungen auf einer tragfaehigen Verarbeitung stehen.
+
+Ohne diese Trennung wirkte eine Datenprobe wie eine banale Erkenntnis
+("natuerlich sind das zwei Formate") -- ihr Wert liegt aber nicht in der
+Antwort, sondern darin, dass die Datenverarbeitung die bekannte Antwort
+reproduziert.
 
 Drei Grundsaetze
 ----------------
@@ -69,6 +91,12 @@ BEREICH_STAMM = "Stammdaten der Hauptspiele (PokeAPI)"
 BEREICH_QUELLEN = "Quellenvergleich ueber die Spielformen"
 BEREICH_MAERKTE = "Laender- und Marktvergleich"
 
+# Die zwei Arten einer Hypothese (siehe Moduldocstring). Eine Datenprobe traegt
+# ein durch die Spielregeln festgelegtes Soll-Ergebnis und prueft damit die
+# eigene Verarbeitung; eine Erkenntnisfrage ist ergebnisoffen.
+ART_ERKENNTNIS = "erkenntnis"
+ART_DATENPROBE = "datenprobe"
+
 
 @dataclass(frozen=True)
 class Hypothese:
@@ -83,6 +111,12 @@ class Hypothese:
     verfahren: str
     datenbasis: str
     berechnung: Callable[[sqlite3.Connection], Pruefgroesse]
+    # Welche Entscheidung am Ergebnis haengt -- aus Sicht dessen, der die
+    # Anwendung benutzt. Eine Hypothese ohne Abnehmer ihres Ergebnisses
+    # gehoert nicht in den Katalog.
+    anwendungsfall: str = ""
+    # Erkenntnisfrage oder Datenprobe (Known-Answer-Test der Datenkette).
+    art: str = ART_ERKENNTNIS
     # Formulierung des Befunds. Beide Faelle stehen im Katalog, damit die
     # Auslegung nicht erst nach Blick auf das Ergebnis entsteht.
     bei_verwerfung: str = ""
@@ -484,8 +518,11 @@ def _pruefe_spieluebergreifend(conn: sqlite3.Connection) -> Pruefgroesse:
 KATALOG: list[Hypothese] = [
     Hypothese(
         schluessel="H1",
-        titel="Das Metagame driftet, es schwankt nicht nur",
+        titel="Wie schnell veraltet ein Tagesstand?",
         bereich=BEREICH_VGC,
+        anwendungsfall="Wer sich heute auf ein Turnier am Wochenende vorbereitet, "
+                       "muss wissen, ob die Auswertung von letzter Woche noch "
+                       "traegt oder ob nur der juengste Stand zaehlt.",
         nullhypothese="Die Uebereinstimmung zweier Tagesranglisten haengt nicht "
                       "vom zeitlichen Abstand der beiden Tage ab.",
         alternativhypothese="Mit wachsendem Abstand nimmt die Uebereinstimmung ab.",
@@ -513,8 +550,11 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H2",
-        titel="Initiative bestimmt den Rang",
+        titel="Lohnt es, beim Teambau auf Initiative zu setzen?",
         bereich=BEREICH_VGC,
+        anwendungsfall="Beim Teambau: ob Initiative ein eigenstaendiges "
+                       "Auswahlkriterium ist -- und ob die Speed-Tiers-Seite zu "
+                       "Recht eine eigene Seite bekommen hat.",
         nullhypothese="Zwischen der Initiative eines Pokemon und seinem Nutzungsrang "
                       "besteht kein Zusammenhang.",
         alternativhypothese="Schnellere Pokemon erreichen bessere Raenge.",
@@ -539,8 +579,12 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H3",
-        titel="Rohstaerke allein entscheidet nicht",
+        titel="Genuegt es, die Pokemon mit den hoechsten Werten zu spielen?",
         bereich=BEREICH_VGC,
+        anwendungsfall="Beim Teambau: faellt die Antwort ja aus, ersetzt eine nach "
+                       "Basiswertsumme sortierte Liste den Team-Builder. Faellt sie "
+                       "nein aus, entscheiden Rollen und Typen -- und genau dafuer "
+                       "gibt es die Analyse.",
         nullhypothese="Zwischen der Basiswertsumme und dem Nutzungsrang besteht "
                       "kein Zusammenhang.",
         alternativhypothese="Pokemon mit hoeherer Basiswertsumme erreichen bessere Raenge.",
@@ -559,22 +603,28 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H4",
-        titel="Einzel- und Doppelkampf sind zwei Formate, nicht eines",
+        titel="Wie viel Doppelkampf-Wissen traegt im Einzelkampf?",
         bereich=BEREICH_VGC,
+        anwendungsfall="Wer beide Formate spielt: ob die Vorbereitung uebertragbar "
+                       "ist oder je Format neu ansetzt. Die Antwort steckt nicht im "
+                       "Ob des Zusammenhangs, sondern im Wie-weit -- dem Abstand "
+                       "des Koeffizienten zu eins.",
         nullhypothese="Zwischen den Rangfolgen im Einzel- und im Doppelkampf besteht "
                       "kein Zusammenhang.",
         alternativhypothese="Die Rangfolgen haengen zusammen, stimmen aber nicht ueberein.",
-        begruendung="Rechtfertigt eine Grundentscheidung des Datenmodells: das "
-                    "Kampfformat ist eine eigene Dimension, keine Filterspalte. "
-                    "Waeren beide Formate gleich, waere diese Trennung Aufwand ohne "
-                    "Ertrag.",
+        begruendung="Dass beide Formate irgendwie zusammenhaengen, ist zu erwarten "
+                    "-- interessant ist die Groesse des eigenstaendigen Anteils. "
+                    "Er beziffert, wie viel Vorbereitung sich uebertragen laesst, "
+                    "und rechtfertigt zugleich eine Grundentscheidung des "
+                    "Datenmodells: das Kampfformat als eigene Dimension.",
         verfahren="Spearman-Rangkorrelation der paarweise zugeordneten Raenge. Die "
                   "Effektstaerke traegt hier die Aussage, nicht der p-Wert.",
         datenbasis="Juengster Tag, beide Kampfformate, rund 235 gemeinsame Pokemon.",
         berechnung=_pruefe_formatunterschied,
         bei_verwerfung="Die Formate haengen zusammen, ohne deckungsgleich zu sein. "
                        "Der Abstand zur vollstaendigen Uebereinstimmung ist der "
-                       "eigenstaendige Anteil des jeweiligen Formats.",
+                       "eigenstaendige Anteil des jeweiligen Formats -- dieser Teil "
+                       "der Vorbereitung ist je Format neu zu leisten.",
         bei_beibehaltung="Kein nachweisbarer Zusammenhang zwischen den Formaten.",
         einschraenkung="Ein Zusammenhang ist bei gemeinsamer Grundgesamtheit zu "
                        "erwarten; die Nullhypothese ist hier bewusst schwach. Die "
@@ -582,8 +632,15 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H5",
-        titel="Flaechenattacken sind ein Merkmal des Doppelkampfs",
+        titel="Kommen die Spielregeln in der Datenkette an?",
         bereich=BEREICH_VGC,
+        art=ART_DATENPROBE,
+        anwendungsfall="Vertrauensgrundlage fuer alle Attackenauswertungen: dass "
+                       "Flaechenattacken in den Doppelkampf gehoeren, weiss jeder -- "
+                       "gerade deshalb muss dieser zwingende Effekt in den eigenen "
+                       "Daten messbar sein. Bleibt er aus, ist die Verknuepfung von "
+                       "Champions-Merkmalen und PokeAPI-Stammdaten defekt, und kein "
+                       "Scouting-Bericht waere mehr belastbar.",
         nullhypothese="Der Anteil von Attacken mit Flaechenwirkung unterscheidet sich "
                       "zwischen Einzel- und Doppelkampf nicht.",
         alternativhypothese="Im Doppelkampf werden Flaechenattacken haeufiger gespielt.",
@@ -606,8 +663,12 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H6",
-        titel="Der Typ entscheidet mit",
+        titel="Lohnt es, die Defensive an der Meta auszurichten?",
         bereich=BEREICH_VGC,
+        anwendungsfall="Beim Teambau mit dem Team-Builder: haengen die Raenge am "
+                       "Typ, muss die Defensivbewertung mit der Meta-Praesenz "
+                       "gewichtet werden. Haengen sie nicht daran, genuegte eine "
+                       "ungewichtete Deckung aller 18 Typen.",
         nullhypothese="Die Nutzungsraenge verteilen sich ueber alle Primaertypen gleich.",
         alternativhypothese="Mindestens ein Typ steht systematisch besser oder "
                             "schlechter als die uebrigen.",
@@ -633,8 +694,12 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H7",
-        titel="Haeufig gespielte Pokemon sind berechenbarer",
+        titel="Ist absehbar, was ein Top-Pokemon im Set traegt?",
         bereich=BEREICH_VGC,
+        anwendungsfall="Im Team-Preview mit 60 Sekunden auf der Uhr: wie viel "
+                       "Vertrauen der Scouting-Bericht verdient, wenn der Gegner "
+                       "weit oben steht -- und wie viel Vorsicht bei einem "
+                       "Aussenseiter geboten ist, dessen Set offener ist.",
         nullhypothese="Zwischen dem Nutzungsrang und der Konzentration der "
                       "Attackenanteile besteht kein Zusammenhang.",
         alternativhypothese="Je besser der Rang, desto konzentrierter die Attackenwahl.",
@@ -653,8 +718,15 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H8",
-        titel="Die Itemwahl folgt dem Offensivprofil",
+        titel="Trifft das abgeleitete Offensivprofil etwas Reales?",
         bereich=BEREICH_VGC,
+        art=ART_DATENPROBE,
+        anwendungsfall="Absicherung einer Anreicherung, auf der Scouting und "
+                       "Schadensrechner aufbauen: das Offensivprofil ist im ETL "
+                       "aus Basiswerten errechnet. Nur wenn Spieler ihre Items "
+                       "erkennbar danach waehlen, trifft die Rechenvorschrift eine "
+                       "reale Unterscheidung -- sonst waeren alle darauf "
+                       "gestuetzten Aussagen Zahlenspielerei.",
         nullhypothese="Das meistgetragene Item ist unabhaengig vom Offensivprofil "
                       "des Pokemon.",
         alternativhypothese="Physische und spezielle Angreifer tragen unterschiedliche Items.",
@@ -674,8 +746,15 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H9",
-        titel="Bizarroraum-Traeger sind langsamer",
+        titel="Trennt die Taktik-Klasse wirklich Spielweisen?",
         bereich=BEREICH_VGC,
+        art=ART_DATENPROBE,
+        anwendungsfall="Absicherung des Strategie-Radars im Gegner-Scouting: dass "
+                       "Bizarroraum-Teams langsam sind, folgt aus der Spielmechanik. "
+                       "Findet die im ETL vergebene Taktik-Klasse diesen bekannten "
+                       "Unterschied nicht wieder, markiert der Radar die falschen "
+                       "Pokemon -- und die Warnung vor dem Bizarroraum-Team kaeme "
+                       "im Team-Preview nicht an.",
         nullhypothese="Pokemon, die Bizarroraum im Set fuehren, unterscheiden sich in "
                       "ihrer Initiative nicht vom uebrigen Feld.",
         alternativhypothese="Sie sind langsamer als das uebrige Feld.",
@@ -694,8 +773,12 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H10",
-        titel="Am Wochenende bewegt sich mehr",
+        titel="Taugt der Sonntagsstand fuer die Vorbereitung am Montag?",
         bereich=BEREICH_VGC,
+        anwendungsfall="Fuer Betrieb und Vorbereitung: ruettelt das Wochenende die "
+                       "Rangliste staerker durch, ist der Berichtstag bei jeder "
+                       "Auswertung mitzudenken -- und ein Montagsturnier besser auf "
+                       "dem Freitagsstand vorzubereiten als auf dem Sonntag.",
         nullhypothese="Die taegliche Rangbewegung unterscheidet sich zwischen "
                       "Wochenend- und Wochentagen nicht.",
         alternativhypothese="An Wochenenden faellt die Rangbewegung staerker aus.",
@@ -718,8 +801,11 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H11",
-        titel="Die Regionen spielen verschiedene Decks",
+        titel="Treffe ich in Japan auf ein anderes Feld als in Europa?",
         bereich=BEREICH_MAERKTE,
+        anwendungsfall="Turniervorbereitung im Sammelkartenspiel: ob die globale "
+                       "Meta-Sicht genuegt oder die Vorbereitung auf die Region "
+                       "des Turnierorts zugeschnitten werden muss.",
         nullhypothese="Die Verteilung der Deck-Archetypen ist unabhaengig von der "
                       "Region des Spielers.",
         alternativhypothese="Mindestens eine Region bevorzugt andere Archetypen.",
@@ -745,8 +831,11 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H12",
-        titel="Superliga und Meisterliga sind zwei verschiedene Spiele",
+        titel="Muss ich meinen GO-Kader je Liga neu bewerten?",
         bereich=BEREICH_QUELLEN,
+        anwendungsfall="Fuer GO-Spieler: ob ein in der Superliga bewaehrtes Pokemon "
+                       "auch fuer die Meisterliga eine Empfehlung ist -- und fuers "
+                       "Datenmodell, ob die Liga eine eigene Dimension verdient.",
         nullhypothese="Zwischen den Bewertungen der Pokemon in Super- und "
                       "Meisterliga besteht kein Zusammenhang.",
         alternativhypothese="Die Bewertungen haengen zusammen.",
@@ -768,8 +857,12 @@ KATALOG: list[Hypothese] = [
     ),
     Hypothese(
         schluessel="H13",
-        titel="Staerke uebertraegt sich nicht zwischen den Spielen",
+        titel="Ist ein starkes Pokemon in jedem Spiel stark?",
         bereich=BEREICH_QUELLEN,
+        anwendungsfall="Wer von einem Spiel ins andere wechselt: ob sich das "
+                       "Wissen ueber starke Pokemon mitnehmen laesst -- oder ob "
+                       "jedes Regelwerk seine eigene Meta erzeugt und die "
+                       "Vorbereitung von vorn beginnt.",
         nullhypothese="Zwischen dem VGC-Rang eines Pokemon und seinem GO-Score "
                       "besteht kein Zusammenhang.",
         alternativhypothese="Wer im VGC oben steht, steht auch in GO oben.",
