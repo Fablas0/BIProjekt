@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS Dim_Pokemon (
     pokedex_id      INTEGER NOT NULL,       -- natuerlicher Schluessel (Quellsystem)
     slug            TEXT    NOT NULL,       -- formgenauer PokeAPI-Bezeichner
     anzeigename     TEXT    NOT NULL,
+    name_de         TEXT,                   -- deutscher Name (PokeAPI-Uebersetzung)
     spezies         TEXT    NOT NULL,       -- Hierarchieebene 2
     generation      INTEGER NOT NULL,       -- Hierarchieebene 1
     typ1            TEXT    NOT NULL,
@@ -217,6 +218,7 @@ CREATE TABLE IF NOT EXISTS Dim_Attacke (
     attacke_sk    INTEGER PRIMARY KEY AUTOINCREMENT,
     slug          TEXT NOT NULL UNIQUE,     -- kompakt, z.B. 'dragonclaw'
     anzeigename   TEXT NOT NULL,
+    name_de       TEXT,                     -- deutscher Name (PokeAPI-Uebersetzung)
     typ           TEXT,
     kategorie     TEXT,                     -- physical | special | status
     basisschaden  INTEGER,
@@ -238,6 +240,7 @@ CREATE TABLE IF NOT EXISTS Dim_Item (
     slug           TEXT NOT NULL UNIQUE,    -- kompakt, z.B. 'focussash'
     pokeapi_slug   TEXT,                    -- 'focus-sash'
     anzeigename    TEXT NOT NULL,
+    name_de        TEXT,                    -- deutscher Name (PokeAPI-Uebersetzung)
     kategorie      TEXT,                    -- Kategorie der PokeAPI
     wirkung_klasse TEXT NOT NULL DEFAULT 'Sonstige',  -- Anreicherung
     effekt_kurz    TEXT,
@@ -251,6 +254,7 @@ CREATE TABLE IF NOT EXISTS Dim_Faehigkeit (
     slug           TEXT NOT NULL UNIQUE,    -- kompakt, z.B. 'intimidate'
     pokeapi_slug   TEXT,
     anzeigename    TEXT NOT NULL,
+    name_de        TEXT,                    -- deutscher Name (PokeAPI-Uebersetzung)
     wirkung_klasse TEXT NOT NULL DEFAULT 'Sonstige',  -- Anreicherung
     effekt_kurz    TEXT,
     generation     INTEGER
@@ -451,7 +455,7 @@ DROP VIEW IF EXISTS V_Usage;
 CREATE VIEW V_Usage AS
 SELECT
     f.pokemon_sk, f.zeit_sk, f.saison_sk, f.kampfformat_sk,
-    p.pokedex_id, p.anzeigename, p.slug, p.spezies, p.generation,
+    p.pokedex_id, p.anzeigename, p.name_de, p.slug, p.spezies, p.generation,
     p.typ1, p.typ2, p.typ_kombination,
     p.hp, p.attack, p.defense, p.sp_attack, p.sp_defense, p.speed,
     p.stufe50_hp, p.stufe50_attack, p.stufe50_defense,
@@ -491,7 +495,7 @@ DROP VIEW IF EXISTS V_Merkmal;
 CREATE VIEW V_Merkmal AS
 SELECT
     m.pokemon_sk, m.zeit_sk, m.saison_sk, m.kampfformat_sk,
-    p.anzeigename, p.slug, p.pokedex_id, p.typ1, p.typ2,
+    p.anzeigename, p.name_de, p.slug, p.pokedex_id, p.typ1, p.typ2,
     z.datum_iso, z.monat_iso,
     s.schluessel AS saison, s.ist_aktuell AS saison_aktuell,
     k.schluessel AS kampfformat,
@@ -502,9 +506,11 @@ SELECT
     m.wert_sp_attack, m.wert_sp_defense, m.wert_speed,
     a.typ AS attacke_typ, a.kategorie AS attacke_kategorie,
     a.basisschaden, a.prioritaet, a.zielbereich, a.taktik_klasse,
+    a.name_de AS attacke_name_de,
     i.wirkung_klasse AS item_klasse, i.kategorie AS item_kategorie,
-    i.effekt_kurz AS item_effekt,
-    fa.wirkung_klasse AS faehigkeit_klasse, fa.effekt_kurz AS faehigkeit_effekt
+    i.effekt_kurz AS item_effekt, i.name_de AS item_name_de,
+    fa.wirkung_klasse AS faehigkeit_klasse, fa.effekt_kurz AS faehigkeit_effekt,
+    fa.name_de AS faehigkeit_name_de
 FROM Fact_Champions_Merkmal m
 JOIN Dim_Pokemon     p ON p.pokemon_sk     = m.pokemon_sk
 JOIN Dim_Zeit        z ON z.zeit_sk        = m.zeit_sk
@@ -533,7 +539,7 @@ SELECT
     f.quell_id, f.liga_sk, f.zeit_sk, f.score, f.rang, f.ist_schatten,
     l.schluessel AS liga, l.bezeichnung AS liga_name, l.wp_grenze,
     z.datum_iso,
-    p.slug, p.anzeigename, p.typ1, p.typ2, p.generation, p.pokedex_id
+    p.slug, p.anzeigename, p.name_de, p.typ1, p.typ2, p.generation, p.pokedex_id
 FROM Fact_GO_Meta f
 JOIN Dim_Liga l ON l.liga_sk = f.liga_sk
 JOIN Dim_Zeit z ON z.zeit_sk = f.zeit_sk
@@ -612,6 +618,13 @@ NACHGEREICHTE_SPALTEN: dict[str, dict[str, str]] = {
         "item_sk": "INTEGER REFERENCES Dim_Item (item_sk)",
         "faehigkeit_sk": "INTEGER REFERENCES Dim_Faehigkeit (faehigkeit_sk)",
     },
+    # Deutsche Namen aus den Uebersetzungen der PokeAPI. Nullable, weil eine
+    # Uebersetzung fehlen kann -- die Anzeige faellt dann auf den englischen
+    # Anzeigenamen zurueck.
+    "Dim_Pokemon": {"name_de": "TEXT"},
+    "Dim_Attacke": {"name_de": "TEXT"},
+    "Dim_Item": {"name_de": "TEXT"},
+    "Dim_Faehigkeit": {"name_de": "TEXT"},
 }
 
 

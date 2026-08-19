@@ -65,13 +65,22 @@ def stammdaten_laden(conn: sqlite3.Connection, fortschritt: Fortschritt = _still
     try:
         load.lade_quelle(conn, "pokeapi")
 
+        # Bereits uebersetzte Spezies muessen nicht erneut abgerufen werden --
+        # der Namensabzug beschraenkt sich auf das Fehlende, im Regelbetrieb
+        # also auf nichts. Den Bestand schreibt der Ladeschritt fort.
+        uebersetzt = frozenset(z[0] for z in conn.execute(
+            "SELECT DISTINCT spezies FROM Dim_Pokemon "
+            "WHERE ist_aktuell = 1 AND name_de IS NOT NULL"))
+
         with extract.sitzung() as s:
-            abzug = extract.hole_pokemon_stammdaten(s, fortschritt)
+            abzug = extract.hole_pokemon_stammdaten(
+                s, fortschritt, uebersetzte_spezies=uebersetzt)
 
             fortschritt(0.85, "Transformiere Stammdaten ...")
             saetze = []
             for nutzlast in abzug.pokemon:
-                satz, befund = transformiere_pokemon(nutzlast, abzug.generation_je_spezies)
+                satz, befund = transformiere_pokemon(
+                    nutzlast, abzug.generation_je_spezies, abzug.namen_de)
                 if satz:
                     saetze.append(satz)
                 elif befund:

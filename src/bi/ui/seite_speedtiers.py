@@ -21,6 +21,7 @@ from .komponenten import (
     hole_verbindung,
     kennzahl_kachel,
     kopfauswahl,
+    name_mit_deutsch,
     seitenkopf,
     tabelle,
 )
@@ -65,7 +66,7 @@ def zeichne() -> None:
     team = st.multiselect(
         "Eigenes Team zum Vergleich (optional)",
         options=verfuegbar["anzeigename"].tolist(), max_selections=6,
-        key="speed_team",
+        key="speed_team", format_func=name_mit_deutsch,
     )
 
     _zeige_eckwerte(tiers, verfuegbar)
@@ -270,11 +271,12 @@ def _zeige_benchmark(conn, meta: pd.DataFrame, monat: str, kampfformat: str) -> 
     namen = meta["anzeigename"].tolist()
     links, mitte, rechts = st.columns(3)
     with links:
-        angreifer = st.selectbox("Eigenes Pokemon", namen, key="bench_angreifer")
+        angreifer = st.selectbox("Eigenes Pokemon", namen, key="bench_angreifer",
+                                 format_func=name_mit_deutsch)
     with mitte:
         standard_ziel = 1 if len(namen) > 1 else 0
         ziel = st.selectbox("Zu ueberholendes Ziel", namen, index=standard_ziel,
-                            key="bench_ziel")
+                            key="bench_ziel", format_func=name_mit_deutsch)
     with rechts:
         wesen = st.selectbox(
             "Angenommenes Wesen", ["Timid", "Jolly", "Hasty", "Naive", "Hardy"],

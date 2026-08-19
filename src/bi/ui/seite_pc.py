@@ -33,7 +33,15 @@ from ..stats import (
     pruefe_statuspunkte,
 )
 from . import anmeldung
-from .komponenten import hole_verbindung, seitenkopf, typ_abzeichen_paar
+from .komponenten import (
+    attacke_mit_deutsch,
+    faehigkeit_mit_deutsch,
+    hole_verbindung,
+    item_mit_deutsch,
+    name_mit_deutsch,
+    seitenkopf,
+    typ_abzeichen_paar,
+)
 
 PUNKTE_BESCHRIFTUNG = {
     "hp": "KP", "attack": "Angriff", "defense": "Verteidigung",
@@ -96,6 +104,7 @@ def _erfassung(conn, nutzer, stamm: dict[str, pd.DataFrame],
     namen = dict(zip(pokemon["anzeigename"], pokemon["slug"], strict=True))
 
     gewaehlt = st.selectbox("Pokemon", list(namen), index=None,
+                            format_func=name_mit_deutsch,
                             placeholder="Pokemon waehlen ...")
     if not gewaehlt:
         return
@@ -115,16 +124,19 @@ def _erfassung(conn, nutzer, stamm: dict[str, pd.DataFrame],
         auswahl = st.columns(3)
         with auswahl[0]:
             item = st.selectbox("Item", stamm["items"]["anzeigename"].tolist() or ["-"],
-                                index=None, placeholder="Kein Item")
+                                index=None, format_func=item_mit_deutsch,
+                                placeholder="Kein Item")
         with auswahl[1]:
             faehigkeit = st.selectbox(
                 "Faehigkeit", stamm["faehigkeiten"]["anzeigename"].tolist() or ["-"],
-                index=None, placeholder="Nicht angegeben")
+                index=None, format_func=faehigkeit_mit_deutsch,
+                placeholder="Nicht angegeben")
         with auswahl[2]:
             wesen = st.selectbox("Wesen", list(WESEN), index=list(WESEN).index("Hardy"))
 
         attacken = st.multiselect("Attacken (bis zu vier)",
                                   stamm["attacken"]["anzeigename"].tolist(),
+                                  format_func=attacke_mit_deutsch,
                                   max_selections=4)
 
         st.markdown(f"**Statuspunkte** -- hoechstens {MAX_SP_JE_WERT} je Wert, "

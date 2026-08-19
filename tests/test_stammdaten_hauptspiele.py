@@ -135,6 +135,21 @@ def test_geaenderte_stammdaten_werden_uebernommen(conn) -> None:
     assert zeile["effekt_kurz"] == "Holder's Attack is raised."
 
 
+def test_deutscher_name_wird_uebernommen_und_nicht_getilgt(conn) -> None:
+    """Der Name kommt aus dem names-Block; ein Lauf ohne ihn tilgt nichts."""
+    mit_namen = transformiere_item(_item(
+        "focus-sash", names=[{"language": {"name": "de"}, "name": "Fokusband"}]))
+    assert mit_namen["name_de"] == "Fokusband"
+    load.lade_item_dimension(conn, [mit_namen])
+
+    ohne_namen = transformiere_item(_item("focus-sash"))
+    assert ohne_namen["name_de"] is None
+    load.lade_item_dimension(conn, [ohne_namen])
+
+    zeile = conn.execute("SELECT name_de FROM Dim_Item WHERE slug = 'focussash'").fetchone()
+    assert zeile["name_de"] == "Fokusband"
+
+
 def test_merkmalsfakt_traegt_die_neuen_fremdschluessel(conn) -> None:
     """Die Sicht muss Itemwirkung und Faehigkeitswirkung mitliefern."""
     spalten = {z[1] for z in conn.execute("PRAGMA table_info(Fact_Champions_Merkmal)")}

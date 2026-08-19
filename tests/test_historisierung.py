@@ -73,6 +73,34 @@ def test_unveraenderte_daten_erzeugen_keinen_neuen_satz(conn) -> None:
     assert conn.execute("SELECT COUNT(*) FROM Dim_Pokemon").fetchone()[0] == 1
 
 
+def test_deutscher_name_wird_nachgetragen_und_fortgeschrieben(conn) -> None:
+    """Der deutsche Name ist Beschriftung, keine fachliche Eigenschaft.
+
+    Er darf keinen neuen Gueltigkeitszeitraum eroeffnen, muss sich aber
+    nachtragen lassen -- und ein Lauf ohne Uebersetzungsabzug darf einen
+    bekannten Namen nicht wieder tilgen.
+    """
+    ohne_namen = _pokemon()
+    assert ohne_namen["name_de"] is None
+    load.lade_pokemon_dimension(conn, [ohne_namen], stichtag="2026-01-01")
+
+    zaehler = load.lade_pokemon_dimension(
+        conn, [{**_pokemon(), "name_de": "Fuegro"}], stichtag="2026-02-01")
+    assert zaehler == {"neu": 0, "geaendert": 0, "unveraendert": 1}
+    assert conn.execute("SELECT COUNT(*) FROM Dim_Pokemon").fetchone()[0] == 1
+    assert conn.execute("SELECT name_de FROM Dim_Pokemon").fetchone()[0] == "Fuegro"
+
+    # Ein spaeterer Lauf ohne Namen schreibt den Bestand fort ...
+    load.lade_pokemon_dimension(conn, [_pokemon()], stichtag="2026-03-01")
+    assert conn.execute("SELECT name_de FROM Dim_Pokemon").fetchone()[0] == "Fuegro"
+
+    # ... auch ueber eine fachliche Aenderung hinweg.
+    load.lade_pokemon_dimension(conn, [_pokemon(attack=140)], stichtag="2026-06-01")
+    zeile = conn.execute(
+        "SELECT name_de FROM Dim_Pokemon WHERE ist_aktuell = 1").fetchone()
+    assert zeile[0] == "Fuegro"
+
+
 def test_balance_aenderung_eroeffnet_neuen_zeitraum(conn) -> None:
     """Der alte Zustand bleibt erhalten und wird sauber abgegrenzt."""
     load.lade_pokemon_dimension(conn, [_pokemon(attack=115)], stichtag="2026-01-01")

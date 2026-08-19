@@ -145,8 +145,8 @@ def befunde_protokollieren(conn: sqlite3.Connection, lauf_id: int,
 # --------------------------------------------------------------------------
 
 _POKEMON_SPALTEN = (
-    "pokedex_id", "slug", "anzeigename", "spezies", "generation", "typ1", "typ2",
-    "typ_kombination", *STATUSWERTE,
+    "pokedex_id", "slug", "anzeigename", "name_de", "spezies", "generation",
+    "typ1", "typ2", "typ_kombination", *STATUSWERTE,
     *(f"stufe50_{name}" for name in STATUSWERTE),
     "basiswert_summe", "offensiv_profil", "rolle", "speed_klasse", "resistenz_wert",
     "row_hash",
@@ -157,6 +157,12 @@ def lade_pokemon_dimension(conn: sqlite3.Connection, saetze: list[dict[str, Any]
                            stichtag: str | None = None) -> dict[str, int]:
     """Laedt ``Dim_Pokemon`` bi-temporal historisiert.
 
+    Der deutsche Name ist wie der Anzeigename eine Beschriftung, keine
+    fachliche Eigenschaft: er geht nicht in den ``row_hash`` ein und eroeffnet
+    keinen neuen Gueltigkeitszeitraum. Er wird nachgetragen, wo er fehlt, und
+    aus dem Bestand fortgeschrieben, wenn ein Lauf ihn nicht liefert -- sonst
+    wuerde ein Stammdatenlauf ohne Uebersetzungsabzug die Namen wieder tilgen.
+
     Rueckgabe: Zaehler ueber ``neu``, ``geaendert`` und ``unveraendert``.
     """
     gueltig_ab = stichtag or date.today().isoformat()
@@ -164,23 +170,30 @@ def lade_pokemon_dimension(conn: sqlite3.Connection, saetze: list[dict[str, Any]
     jetzt = _jetzt()
 
     bestand = {
-        zeile["slug"]: (zeile["pokemon_sk"], zeile["row_hash"], zeile["gueltig_ab"])
+        zeile["slug"]: (zeile["pokemon_sk"], zeile["row_hash"], zeile["gueltig_ab"],
+                        zeile["name_de"])
         for zeile in conn.execute(
-            "SELECT pokemon_sk, slug, row_hash, gueltig_ab FROM Dim_Pokemon WHERE ist_aktuell = 1"
+            "SELECT pokemon_sk, slug, row_hash, gueltig_ab, name_de"
+            " FROM Dim_Pokemon WHERE ist_aktuell = 1"
         )
     }
 
     zaehler = {"neu": 0, "geaendert": 0, "unveraendert": 0}
     einfuegen: list[tuple[Any, ...]] = []
     abgrenzen: list[tuple[str, int]] = []
+    namen_nachtragen: list[tuple[str, int]] = []
 
     for satz in saetze:
         alt = bestand.get(satz["slug"])
+        if alt is not None and not satz.get("name_de"):
+            satz = {**satz, "name_de": alt[3]}
 
         if alt is None:
             zaehler["neu"] += 1
         elif alt[1] == satz["row_hash"]:
             zaehler["unveraendert"] += 1
+            if satz.get("name_de") and satz["name_de"] != alt[3]:
+                namen_nachtragen.append((satz["name_de"], alt[0]))
             continue
         else:
             # Der bisherige Satz wird zum Vortag abgegrenzt. Faellt die Aenderung
@@ -190,8 +203,14 @@ def lade_pokemon_dimension(conn: sqlite3.Connection, saetze: list[dict[str, Any]
             zaehler["geaendert"] += 1
 
         einfuegen.append(
-            tuple(satz[spalte] for spalte in _POKEMON_SPALTEN)
+            tuple(satz.get(spalte) for spalte in _POKEMON_SPALTEN)
             + (gueltig_ab, UNENDLICH, 1, jetzt)
+        )
+
+    if namen_nachtragen:
+        conn.executemany(
+            "UPDATE Dim_Pokemon SET name_de = ? WHERE pokemon_sk = ?",
+            namen_nachtragen,
         )
 
     if abgrenzen:
@@ -219,14 +238,24 @@ def _sichere_dimension(conn: sqlite3.Connection, tabelle: str, schluessel_spalte
 
     Diese Dimensionen sind nicht historisiert: ihre Attribute sind Stammdaten ohne
     fachliche Aenderungshistorie im Betrachtungszeitraum.
+
+    Der deutsche Name wird nur ueberschrieben, wenn der neue Satz einen liefert:
+    ein Lauf, dessen Quellnutzlast die Uebersetzung nicht enthielt, darf einen
+    bereits bekannten Namen nicht wieder tilgen.
     """
     if not saetze:
         return
     spalten = list(saetze[0].keys())
     platzhalter = ", ".join("?" * len(spalten))
     weitere = [s for s in spalten if s != schluessel_spalte]
+
+    def zuweisung(spalte: str) -> str:
+        if spalte == "name_de":
+            return f"name_de = COALESCE(excluded.name_de, {tabelle}.name_de)"
+        return f"{spalte} = excluded.{spalte}"
+
     konflikt = (
-        f"DO UPDATE SET {', '.join(f'{s} = excluded.{s}' for s in weitere)}"
+        f"DO UPDATE SET {', '.join(zuweisung(s) for s in weitere)}"
         if weitere else "DO NOTHING"
     )
     conn.executemany(

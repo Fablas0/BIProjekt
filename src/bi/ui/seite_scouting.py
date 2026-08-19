@@ -19,6 +19,7 @@ from .komponenten import (
     hinweis_messniveau,
     hole_verbindung,
     kopfauswahl,
+    name_mit_deutsch,
     seitenkopf,
     tabelle,
     typ_abzeichen_paar,
@@ -44,9 +45,10 @@ def zeichne() -> None:
         auswahl = st.multiselect(
             "Gegnerisches Team zusammenstellen (bis zu sechs Pokemon)",
             options=verfuegbar["anzeigename"].tolist(),
-            max_selections=6,
+            max_selections=6, format_func=name_mit_deutsch,
             help="Die Auswahl umfasst alle Pokemon, die am gewaehlten Tag "
-                 "einen Nutzungsrang erhalten haben.",
+                 "einen Nutzungsrang erhalten haben. Die Suche findet auch "
+                 "den deutschen Namen.",
         )
 
     if not auswahl:

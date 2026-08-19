@@ -17,6 +17,7 @@ from . import design
 from .komponenten import (
     hole_verbindung,
     kennzahl_kachel,
+    name_mit_deutsch,
     seitenkopf,
     tabelle,
     typ_abzeichen_paar,
@@ -81,13 +82,13 @@ def zeichne() -> None:
         st.markdown("#### Dein Team")
         mein_team = st.multiselect(
             "Deine sechs Pokemon", namen, max_selections=6, key="preview_eigene",
-            label_visibility="collapsed",
+            label_visibility="collapsed", format_func=name_mit_deutsch,
         )
     with rechts:
         st.markdown("#### Gegnerisches Team")
         gegner_team = st.multiselect(
             "Die sechs des Gegners", namen, max_selections=6, key="preview_gegner",
-            label_visibility="collapsed",
+            label_visibility="collapsed", format_func=name_mit_deutsch,
         )
 
     if len(mein_team) < mitnahme or len(gegner_team) < mitnahme:

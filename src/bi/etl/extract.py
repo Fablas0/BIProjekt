@@ -102,6 +102,7 @@ class StammdatenAbzug:
 
     pokemon: list[dict[str, Any]] = field(default_factory=list)
     generation_je_spezies: dict[str, int] = field(default_factory=dict)
+    namen_de: dict[str, str] = field(default_factory=dict)
     fehlversuche: list[str] = field(default_factory=list)
 
 
@@ -121,15 +122,49 @@ def hole_generationszuordnung(s: requests.Session, fortschritt: Fortschritt) -> 
     return zuordnung
 
 
-def hole_pokemon_stammdaten(s: requests.Session, fortschritt: Fortschritt = _kein_fortschritt
+def hole_speziesnamen(s: requests.Session, fortschritt: Fortschritt = _kein_fortschritt,
+                      ueberspringen: frozenset[str] = frozenset()) -> dict[str, str]:
+    """Laedt die deutschen Namen der Spezies -- bedarfsgesteuert.
+
+    Die Uebersetzungen stehen ausschliesslich an der Spezies-Ressource, nicht
+    an ``/pokemon``. Ein voller Durchlauf waeren rund 1000 weitere, wegen der
+    Beschreibungstexte grosse Ressourcen -- und der Stammdatenlauf faehrt
+    taeglich. ``ueberspringen`` nennt deshalb die bereits uebersetzten
+    Spezies: abgerufen wird nur, was fehlt, im Regelbetrieb also nichts bis
+    eine neue Spielgeneration erscheint. Fuer die uebersprungenen schreibt der
+    Ladeschritt die vorhandenen Namen fort; ein Fehlschlag einzelner Saetze
+    laesst die Anzeige auf den englischen Namen zurueckfallen.
+    """
+    verzeichnis = _sicher_json(s, f"{POKEAPI_BASIS}/pokemon-species?limit=20000")
+    eintraege = [eintrag for eintrag in (verzeichnis or {}).get("results", [])
+                 if eintrag["name"] not in ueberspringen]
+    rohdaten = _parallel(s, (eintrag["url"] for eintrag in eintraege), fortschritt,
+                         "Lade deutsche Namen")
+
+    namen: dict[str, str] = {}
+    for eintrag, daten in zip(eintraege, rohdaten, strict=True):
+        for uebersetzung in (daten or {}).get("names", []):
+            if (uebersetzung.get("language") or {}).get("name") == "de":
+                namen[eintrag["name"]] = uebersetzung["name"]
+                break
+    return namen
+
+
+def hole_pokemon_stammdaten(s: requests.Session, fortschritt: Fortschritt = _kein_fortschritt,
+                            uebersetzte_spezies: frozenset[str] = frozenset()
                             ) -> StammdatenAbzug:
-    """Laedt den vollstaendigen Pokemon-Bestand inklusive Basiswerten und Typen."""
+    """Laedt den vollstaendigen Pokemon-Bestand inklusive Basiswerten und Typen.
+
+    ``uebersetzte_spezies`` begrenzt den Namensabzug auf das Fehlende --
+    siehe :func:`hole_speziesnamen`.
+    """
     abzug = StammdatenAbzug()
 
     fortschritt(0.0, "Lese Ressourcenverzeichnis der PokeAPI ...")
     verzeichnis = _hole_json(s, f"{POKEAPI_BASIS}/pokemon?limit=20000")["results"]
 
     abzug.generation_je_spezies = hole_generationszuordnung(s, fortschritt)
+    abzug.namen_de = hole_speziesnamen(s, fortschritt, uebersetzte_spezies)
 
     rohdaten = _parallel(s, (eintrag["url"] for eintrag in verzeichnis), fortschritt,
                          "Lade Pokemon-Stammdaten")

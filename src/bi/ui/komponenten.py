@@ -67,6 +67,61 @@ def zwischenspeicher_leeren() -> None:
 
 
 # --------------------------------------------------------------------------
+# Deutsche Namen
+# --------------------------------------------------------------------------
+# Champions und die Analyse arbeiten mit den englischen Anzeigenamen -- sie
+# sind der Schluessel zwischen den Quellsystemen und bleiben es. Fuer die
+# Bedienung zaehlt aber, dass jemand "Vulnona" eintippen kann, ohne den
+# englischen Namen zu kennen: die Auswahlfelder zeigen deshalb beide Namen an
+# und finden damit auch beide (Streamlit sucht im angezeigten Text).
+
+@st.cache_data(ttl=3600)
+def _uebersetzungen(tabelle: str) -> dict[str, str]:
+    """Anzeigename -> deutscher Name einer Stammdatentabelle.
+
+    Nur echte Unterschiede werden gefuehrt; "Pikachu · Pikachu" waere Laerm.
+    """
+    df = abfrage(
+        f"SELECT DISTINCT anzeigename, name_de FROM {tabelle} "  # noqa: S608 -- fester Tabellenname
+        "WHERE name_de IS NOT NULL AND name_de <> anzeigename"
+    )
+    return dict(zip(df["anzeigename"], df["name_de"], strict=True))
+
+
+def name_mit_deutsch(anzeigename: str) -> str:
+    """Beschriftung eines Pokemon-Auswahlfelds: englisch, deutsch dahinter.
+
+    Als ``format_func`` gedacht: der Wert des Felds bleibt der englische
+    Anzeigename, nur die Beschriftung traegt die Uebersetzung mit.
+    """
+    deutsch = _uebersetzungen("Dim_Pokemon").get(anzeigename)
+    return f"{anzeigename} · {deutsch}" if deutsch else anzeigename
+
+
+def attacke_mit_deutsch(anzeigename: str) -> str:
+    """Beschriftung eines Attacken-Auswahlfelds, deutsch dahinter."""
+    deutsch = _uebersetzungen("Dim_Attacke").get(anzeigename)
+    return f"{anzeigename} · {deutsch}" if deutsch else anzeigename
+
+
+def item_mit_deutsch(anzeigename: str) -> str:
+    """Beschriftung eines Item-Auswahlfelds, deutsch dahinter."""
+    deutsch = _uebersetzungen("Dim_Item").get(anzeigename)
+    return f"{anzeigename} · {deutsch}" if deutsch else anzeigename
+
+
+def faehigkeit_mit_deutsch(anzeigename: str) -> str:
+    """Beschriftung eines Faehigkeiten-Auswahlfelds, deutsch dahinter."""
+    deutsch = _uebersetzungen("Dim_Faehigkeit").get(anzeigename)
+    return f"{anzeigename} · {deutsch}" if deutsch else anzeigename
+
+
+def deutscher_pokemonname(anzeigename: str) -> str | None:
+    """Der deutsche Name eines Pokemon, ``None`` ohne abweichende Uebersetzung."""
+    return _uebersetzungen("Dim_Pokemon").get(anzeigename)
+
+
+# --------------------------------------------------------------------------
 # Auswahlfelder
 # --------------------------------------------------------------------------
 

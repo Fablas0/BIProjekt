@@ -10,6 +10,7 @@ import pytest
 
 from bi.etl.mapping import loese_auf, normalisiere
 from bi.etl.transform import (
+    deutscher_formname,
     faehigkeit_klasse,
     offensiv_profil,
     rolle,
@@ -128,6 +129,38 @@ def test_angezeigte_grundwerte_werden_angereichert() -> None:
     assert satz["stufe50_speed"] == 80     # Basiswert 60
 
 
+# --------------------------------------------------------------------------
+# Deutsche Namen
+# --------------------------------------------------------------------------
+
+def test_deutscher_name_kommt_aus_der_speziesuebersetzung() -> None:
+    satz, _ = transformiere_pokemon(_pokeapi_nutzlast(), {"incineroar": 7},
+                                    {"incineroar": "Fuegro"})
+    assert satz["name_de"] == "Fuegro"
+    # Ohne Uebersetzung bleibt das Feld leer statt geraten.
+    satz, _ = transformiere_pokemon(_pokeapi_nutzlast(), {"incineroar": 7}, {})
+    assert satz["name_de"] is None
+
+
+@pytest.mark.parametrize(("slug", "spezies", "spezies_de", "erwartet"), [
+    ("ninetales-alola", "ninetales", "Vulnona", "Alola-Vulnona"),
+    ("slowbro-galar", "slowbro", "Lahmus", "Galar-Lahmus"),
+    ("arcanine-hisui", "arcanine", "Arkani", "Hisui-Arkani"),
+    ("tauros-paldea-aqua-breed", "tauros", "Tauros", "Paldea-Tauros (Aqua Breed)"),
+    ("landorus-therian", "landorus", "Demeteros", "Demeteros (Therian)"),
+    ("urshifu-single-strike", "urshifu", "Wulaosu", "Wulaosu (Single Strike)"),
+    ("garchomp", "garchomp", "Knakrack", "Knakrack"),
+    ("ninetales-alola", "ninetales", None, None),
+])
+def test_deutscher_formname_folgt_der_regel(slug, spezies, spezies_de, erwartet) -> None:
+    """Regionalformen tragen die Region als Praefix, alles andere Klammern.
+
+    Regelbasiert statt Einzelliste -- die amtlichen Formnamen staenden nur in
+    rund 1500 weiteren PokeAPI-Ressourcen.
+    """
+    assert deutscher_formname(slug, spezies, spezies_de) == erwartet
+
+
 def test_satz_ohne_typ_wird_abgewiesen() -> None:
     satz, befund = transformiere_pokemon(_pokeapi_nutzlast(types=[]), {})
     assert satz is None
@@ -200,11 +233,26 @@ def test_attacke_wird_mit_kompaktem_schluessel_gefuehrt() -> None:
         "name": "dragon-claw", "type": {"name": "dragon"},
         "damage_class": {"name": "physical"}, "power": 80, "accuracy": 100,
         "priority": 0, "target": {"name": "selected-pokemon"},
+        "names": [
+            {"language": {"name": "ja"}, "name": "ドラゴンクロー"},
+            {"language": {"name": "de"}, "name": "Drachenklaue"},
+        ],
     })
     assert satz["slug"] == "dragonclaw"
     assert satz["anzeigename"] == "Dragon Claw"
+    assert satz["name_de"] == "Drachenklaue"
     assert satz["typ"] == "Dragon"
     assert satz["taktik_klasse"] == "Offensiv"
+
+
+def test_attacke_ohne_uebersetzung_bleibt_englisch() -> None:
+    """Die Nutzlast traegt die Namen mit -- fehlt Deutsch, bleibt das Feld leer."""
+    satz = transformiere_attacke({
+        "name": "hyper-beam", "type": {"name": "normal"},
+        "damage_class": {"name": "special"}, "power": 150, "accuracy": 90,
+        "priority": 0, "target": {"name": "selected-pokemon"},
+    })
+    assert satz["name_de"] is None
 
 
 def test_zeilen_hash_reagiert_auf_aenderungen() -> None:

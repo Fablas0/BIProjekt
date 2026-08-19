@@ -184,6 +184,52 @@ def _englischer_text(eintraege: list[dict[str, Any]], feld: str) -> str | None:
     return None
 
 
+def deutscher_name(nutzlast: dict[str, Any]) -> str | None:
+    """Zieht den deutschen Namen aus dem ``names``-Block einer PokeAPI-Nutzlast.
+
+    Anders als die Kurztexte sind die **Namen** von Attacken, Items und
+    Faehigkeiten durchgaengig uebersetzt -- sie stehen bereits in den ohnehin
+    geladenen Detailnutzlasten und kosten keinen zusaetzlichen Abruf. Fehlt die
+    Uebersetzung doch einmal, bleibt der Wert leer und die Anzeige faellt auf
+    den englischen Namen zurueck, statt einen falschen zu erfinden.
+    """
+    for eintrag in nutzlast.get("names") or []:
+        if (eintrag.get("language") or {}).get("name") == "de" and eintrag.get("name"):
+            return str(eintrag["name"]).strip()
+    return None
+
+
+# Regionalformen tragen im Deutschen die Region als Praefix ("Alola-Vulnona").
+# Alle uebrigen Formzusaetze werden lesbar in Klammern gefuehrt -- regelbasiert
+# statt ueber eine Einzelliste, damit kuenftige Formen ohne Pflege einen
+# brauchbaren Namen bekommen. Die amtlichen Formnamen ("Tiergeistform") stehen
+# nur in den Form-Ressourcen der PokeAPI; sie abzurufen kostete rund 1500
+# weitere Aufrufe fuer einen rein kosmetischen Unterschied.
+_REGIONALE_PRAEFIXE = {"alola": "Alola-", "galar": "Galar-",
+                      "hisui": "Hisui-", "paldea": "Paldea-"}
+
+
+def deutscher_formname(slug: str, spezies: str, spezies_de: str | None) -> str | None:
+    """Bildet den deutschen Namen einer Form aus dem deutschen Speziesnamen.
+
+    ``ninetales-alola`` wird mit ``Vulnona`` zu ``Alola-Vulnona``,
+    ``landorus-therian`` mit ``Demeteros`` zu ``Demeteros (Therian)``. Ohne
+    uebersetzten Speziesnamen gibt es keinen Formnamen -- lieber der englische
+    Anzeigename als eine halbe Uebersetzung.
+    """
+    if not spezies_de:
+        return None
+    if slug == spezies or not slug.startswith(spezies + "-"):
+        return spezies_de
+
+    zusatz = slug[len(spezies) + 1:]
+    erster, _, rest = zusatz.partition("-")
+    if erster in _REGIONALE_PRAEFIXE:
+        name = _REGIONALE_PRAEFIXE[erster] + spezies_de
+        return f"{name} ({anzeigename(rest)})" if rest else name
+    return f"{spezies_de} ({anzeigename(zusatz)})"
+
+
 def transformiere_item(nutzlast: dict[str, Any]) -> dict[str, Any]:
     """Ueberfuehrt eine PokeAPI-Itemnutzlast in einen Dimensionssatz.
 
@@ -198,6 +244,7 @@ def transformiere_item(nutzlast: dict[str, Any]) -> dict[str, Any]:
         "slug": slug,
         "pokeapi_slug": pokeapi_slug,
         "anzeigename": " ".join(w.capitalize() for w in pokeapi_slug.split("-")),
+        "name_de": deutscher_name(nutzlast),
         "kategorie": kategorie,
         "wirkung_klasse": item_klasse(slug, kategorie),
         "effekt_kurz": _englischer_text(nutzlast.get("effect_entries", []), "short_effect"),
@@ -215,6 +262,7 @@ def transformiere_faehigkeit(nutzlast: dict[str, Any]) -> dict[str, Any]:
         "slug": "".join(c for c in pokeapi_slug.lower() if c.isalnum()),
         "pokeapi_slug": pokeapi_slug,
         "anzeigename": " ".join(w.capitalize() for w in pokeapi_slug.split("-")),
+        "name_de": deutscher_name(nutzlast),
         "wirkung_klasse": faehigkeit_klasse(pokeapi_slug),
         "effekt_kurz": _englischer_text(nutzlast.get("effect_entries", []), "short_effect"),
         "generation": _roemisch_zu_zahl(generation) if not ziffern else int(ziffern),
@@ -328,9 +376,14 @@ def zeilen_hash(werte: tuple[Any, ...]) -> str:
     return hashlib.sha256(roh.encode("utf-8")).hexdigest()[:32]
 
 
-def transformiere_pokemon(nutzlast: dict[str, Any], generation_je_spezies: dict[str, int]
+def transformiere_pokemon(nutzlast: dict[str, Any], generation_je_spezies: dict[str, int],
+                          namen_de: dict[str, str] | None = None,
                           ) -> tuple[dict[str, Any] | None, Befund | None]:
     """Erzeugt aus einer PokeAPI-Nutzlast einen Dimensionssatz.
+
+    ``namen_de`` ordnet der Spezies ihren deutschen Namen zu; Formen erhalten
+    ihn ueber :func:`deutscher_formname`. Ohne die Zuordnung bleibt das Feld
+    leer -- der Ladeschritt schreibt dann einen vorhandenen Bestandsnamen fort.
 
     Gibt ``(satz, None)`` oder ``(None, befund)`` zurueck.
     """
@@ -372,6 +425,7 @@ def transformiere_pokemon(nutzlast: dict[str, Any], generation_je_spezies: dict[
         "pokedex_id": nutzlast.get("id"),
         "slug": slug,
         "anzeigename": anzeigename(slug),
+        "name_de": deutscher_formname(slug, spezies, (namen_de or {}).get(spezies)),
         "spezies": spezies,
         "generation": generation_je_spezies.get(spezies, 0),
         "typ1": typ1,
@@ -404,6 +458,7 @@ def transformiere_attacke(nutzlast: dict[str, Any]) -> dict[str, Any]:
         # gelieferte Anzeigename ohne Umweg verknuepfen.
         "slug": kompakt,
         "anzeigename": anzeigename(slug),
+        "name_de": deutscher_name(nutzlast),
         "typ": _typ_normalisieren((nutzlast.get("type") or {}).get("name", "")),
         "kategorie": kategorie,
         "basisschaden": nutzlast.get("power"),

@@ -18,6 +18,7 @@ from .komponenten import (
     hole_verbindung,
     kennzahl_kachel,
     kopfauswahl,
+    name_mit_deutsch,
     seitenkopf,
     tabelle,
 )
@@ -45,6 +46,7 @@ def zeichne() -> None:
         auswahl = st.multiselect(
             "Eigenes Team (bis zu sechs Pokemon)",
             options=verfuegbar["anzeigename"].tolist(), max_selections=6,
+            format_func=name_mit_deutsch,
         )
 
     if not auswahl:
