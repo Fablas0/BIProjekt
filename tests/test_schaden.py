@@ -138,6 +138,77 @@ def test_schirm_daempft_aber_nicht_bei_kritischem_treffer() -> None:
     assert kritisch.maximum > ohne.maximum  # 1,5 fuer kritisch, Schirm entfaellt
 
 
+def test_statusstufen_wirken_auf_die_kampfwerte() -> None:
+    """+2 Angriff verdoppelt den Angriffswert: grund = floor(4400/50)+2 = 90.
+
+    -1 Verteidigung entspricht x1,5 auf den Angriffserfolg ueber den Nenner:
+    Verteidigung floor(100 * 2/3) = 66.
+    """
+    plus_zwei = berechne(_kaempfer(), _kaempfer(typ1="Grass"),
+                         _angriff(stufe_angriff=2))
+    assert (plus_zwei.minimum, plus_zwei.maximum) == (76, 90)
+
+    gesenkt = berechne(_kaempfer(), _kaempfer(typ1="Grass"),
+                       _angriff(stufe_verteidigung=-1))
+    # floor(floor(22 * 100 * 100 / 66) / 50) + 2 = floor(3333/50) + 2 = 68.
+    assert gesenkt.maximum == 68
+
+
+def test_kritischer_treffer_ignoriert_schuetzende_stufen() -> None:
+    """Krit ignoriert Bonusstufen der Verteidigung und Malusstufen des Angriffs."""
+    ohne_krit = berechne(_kaempfer(), _kaempfer(typ1="Grass"),
+                         _angriff(stufe_verteidigung=2))
+    # Verteidigung 200: grund = floor(floor(22*100*100/200)/50)+2 = 24.
+    assert ohne_krit.maximum == 24
+    mit_krit = berechne(_kaempfer(), _kaempfer(typ1="Grass"),
+                        _angriff(stufe_verteidigung=2, kritisch=True))
+    # Stufe ignoriert, nur Krit 1,5: 46 -> 69.
+    assert mit_krit.maximum == 69
+
+
+def test_terrain_verstaerkt_nur_bodengebundene_angreifer() -> None:
+    """Elektrofeld: Staerke 100 -> 130, grund = floor(2860/50)+2 = 59."""
+    elektro = _angriff(typ="Electric", kategorie="special", terrain="Elektrofeld")
+    geboostet = berechne(_kaempfer(), _kaempfer(typ1="Normal"), elektro)
+    assert geboostet.maximum == 59
+
+    fliegend = berechne(_kaempfer(typ1="Flying"), _kaempfer(typ1="Normal"), elektro)
+    assert fliegend.maximum == 46  # nicht am Boden, kein Feldbonus
+
+    ballon = berechne(_kaempfer(item_slug="airballoon"), _kaempfer(typ1="Normal"), elektro)
+    assert ballon.maximum == 46  # Luftballon hebt vom Boden ab
+
+
+def test_nebelfeld_daempft_drachen_gegen_bodenziele() -> None:
+    """Staerke 100 -> 50, grund = floor(1100/50)+2 = 24."""
+    drache = _angriff(typ="Dragon", kategorie="special", terrain="Nebelfeld")
+    gedaempft = berechne(_kaempfer(), _kaempfer(typ1="Normal"), drache)
+    assert gedaempft.maximum == 24
+    fliegendes_ziel = berechne(_kaempfer(), _kaempfer(typ1="Flying"), drache)
+    assert fliegendes_ziel.maximum == 46  # Ziel nicht am Boden
+
+
+def test_helfende_hand_verstaerkt_die_staerke() -> None:
+    """Staerke 100 -> 150, grund = floor(3300/50)+2 = 68."""
+    spanne = berechne(_kaempfer(), _kaempfer(typ1="Grass"),
+                      _angriff(helfende_hand=True))
+    assert spanne.maximum == 68
+
+
+def test_unheils_faehigkeiten_druecken_die_passende_seite() -> None:
+    """Unheilsschwert: Verteidigung floor(100*3/4) = 75,
+    grund = floor(floor(220000/75)/50)+2 = floor(2933/50)+2 = 60."""
+    schwert = berechne(_kaempfer(), _kaempfer(typ1="Grass"),
+                       _angriff(unheil=frozenset({"Unheilsschwert"})))
+    assert schwert.maximum == 60
+    # Das Schwert wirkt auf die physische Seite -- ein Spezialangriff bleibt
+    # unberuehrt.
+    speziell = berechne(_kaempfer(), _kaempfer(typ1="Grass"),
+                        _angriff(kategorie="special",
+                                 unheil=frozenset({"Unheilsschwert"})))
+    assert speziell.maximum == 46
+
+
 # --------------------------------------------------------------------------
 # Items und Faehigkeiten
 # --------------------------------------------------------------------------
@@ -177,6 +248,60 @@ def test_faehigkeit_immunitaet_und_abschwaechung() -> None:
     schwebe = berechne(_kaempfer(), _kaempfer(faehigkeit_slug="levitate"),
                        _angriff(typ="Ground"))
     assert schwebe.maximum == 0
+
+
+def test_kraftfaehigkeit_verdoppelt_nur_den_physischen_angriff() -> None:
+    """Kraftkoloss: Angriff 100 -> 200, grund = floor(4400/50)+2 = 90."""
+    physisch = berechne(_kaempfer(faehigkeit_slug="hugepower"),
+                        _kaempfer(typ1="Grass"), _angriff())
+    assert physisch.maximum == 90
+    speziell = berechne(_kaempfer(faehigkeit_slug="hugepower"),
+                        _kaempfer(typ1="Grass"), _angriff(kategorie="special"))
+    assert speziell.maximum == 46
+
+
+def test_anpassung_hebt_den_stab_auf_zwei() -> None:
+    """STAB 2,0 statt 1,5: max 46 -> 92."""
+    spanne = berechne(_kaempfer(typ1="Fighting", faehigkeit_slug="adaptability"),
+                      _kaempfer(typ1="Grass"), _angriff())
+    assert spanne.maximum == 92
+
+
+def test_techniker_verstaerkt_nur_schwache_attacken() -> None:
+    """Staerke 60 -> 90: grund = floor(1980/50)+2 = 41; Staerke 100 unveraendert."""
+    schwach = berechne(_kaempfer(faehigkeit_slug="technician"),
+                       _kaempfer(typ1="Grass"), _angriff(staerke=60))
+    assert schwach.maximum == 41
+    stark = berechne(_kaempfer(faehigkeit_slug="technician"),
+                     _kaempfer(typ1="Grass"), _angriff())
+    assert stark.maximum == 46
+
+
+def test_facettenauge_verdoppelt_resistierten_schaden() -> None:
+    """Kampf gegen Kaefer resistiert (23) -- Facettenauge holt es zurueck (46)."""
+    ohne = berechne(_kaempfer(), _kaempfer(typ1="Bug"), _angriff())
+    assert ohne.maximum == 23
+    linse = berechne(_kaempfer(faehigkeit_slug="tintedlens"),
+                     _kaempfer(typ1="Bug"), _angriff())
+    assert linse.maximum == 46
+
+
+def test_adrenalin_hebt_den_brandmalus_auf() -> None:
+    """Adrenalin: Angriff x1,5 statt Brandhalbierung -- grund = floor(3300/50)+2 = 68."""
+    mit_guts = berechne(_kaempfer(faehigkeit_slug="guts"),
+                        _kaempfer(typ1="Grass"), _angriff(brand=True))
+    assert mit_guts.maximum == 68
+    ohne_guts = berechne(_kaempfer(), _kaempfer(typ1="Grass"), _angriff(brand=True))
+    assert ohne_guts.maximum == 23
+
+
+def test_eisflaechenschuppen_halbieren_speziellen_schaden() -> None:
+    speziell = berechne(_kaempfer(), _kaempfer(typ1="Grass", faehigkeit_slug="icescales"),
+                        _angriff(kategorie="special"))
+    assert speziell.maximum == 23
+    physisch = berechne(_kaempfer(), _kaempfer(typ1="Grass", faehigkeit_slug="icescales"),
+                        _angriff())
+    assert physisch.maximum == 46
 
 
 # --------------------------------------------------------------------------

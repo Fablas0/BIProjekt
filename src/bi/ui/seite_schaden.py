@@ -24,14 +24,23 @@ import streamlit as st
 
 from .. import nutzerdaten
 from ..analytics import kpi
-from ..analytics.schaden import Angriff, Kaempfer, berechne, treffer_bis_ko
+from ..analytics.schaden import (
+    TERRAINS,
+    UNHEIL_WIRKUNG,
+    Angriff,
+    Kaempfer,
+    berechne,
+    treffer_bis_ko,
+)
 from ..config import STANDARD_KAMPFFORMAT, TYP_DEUTSCH
 from ..stats import STATUSWERTE, alle_statuswerte
 from . import anmeldung
 from .komponenten import (
+    attacke_mit_deutsch,
     hinweis_leere_datenbank,
     hole_verbindung,
     kennzahl_kachel,
+    name_mit_deutsch,
     seitenkopf,
 )
 
@@ -105,8 +114,11 @@ def zeichne() -> None:
 
     st.caption(
         "Umgesetzt ist die Schadensformel der Hauptspiele (ab Generation V) mit "
-        "der Rundungsreihenfolge des Spiels. Attacken mit variabler Staerke und "
-        "Feldeffekte jenseits von Wetter und Schirmen bildet der Rechner nicht ab."
+        "der Rundungsreihenfolge des Spiels -- einschliesslich Wetter, Terrain, "
+        "Statusstufen, Schirmen, Helfender Hand und der Unheils-Faehigkeiten. "
+        "Item und Faehigkeit kommen aus dem gewaehlten Set und rechnen mit. "
+        "Attacken mit variabler Staerke (Gyro Ball, Grass Knot) und Mechaniken, "
+        "die vom Kampfverlauf abhaengen, bildet der Rechner bewusst nicht ab."
     )
 
 
@@ -162,6 +174,7 @@ def _kaempfer_waehlen(conn, nutzer, schluessel: str,
         return None
     wahl = st.selectbox("Pokemon", uebersicht["anzeigename"].tolist(),
                         key=f"{schluessel}_meta", index=None,
+                        format_func=name_mit_deutsch,
                         placeholder="Aus der Meta waehlen ...")
     if wahl is None:
         return None
@@ -169,15 +182,16 @@ def _kaempfer_waehlen(conn, nutzer, schluessel: str,
 
     werte = {name: int(zeile[f"wert_{name}"]) if pd.notna(zeile.get(f"wert_{name}"))
              else int(zeile[f"stufe50_{name}"]) for name in STATUSWERTE}
-    item_slug = _meta_item(conn, wahl, tag)
+    item_slug, item_name = _meta_merkmal(conn, wahl, tag, "held_item")
+    faehigkeit_slug, faehigkeit_name = _meta_merkmal(conn, wahl, tag, "ability")
     _steckbrief(zeile["typ1"], zeile.get("typ2"), werte,
-                item_slug, None, rang=int(zeile["rang"]))
+                item_name, faehigkeit_name, rang=int(zeile["rang"]))
     attacken = _meta_attacken(conn, wahl, tag)
     return Kaempfer(
         name=wahl, typ1=zeile["typ1"], typ2=zeile.get("typ2"),
         hp=werte["hp"], attack=werte["attack"], defense=werte["defense"],
         sp_attack=werte["sp_attack"], sp_defense=werte["sp_defense"],
-        item_slug=item_slug,
+        item_slug=item_slug, faehigkeit_slug=faehigkeit_slug,
     ), attacken
 
 
@@ -198,19 +212,33 @@ def _steckbrief(typ1, typ2, werte: dict[str, int], item, faehigkeit,
     st.caption(" · ".join(str(t) for t in teile))
 
 
-def _meta_item(conn, anzeigename: str, tag: str) -> str | None:
-    """Das meistgetragene Item des Pokemon am Berichtstag."""
-    zeile = conn.execute("""
-        SELECT i.slug
+_MERKMAL_DIMENSION = {
+    "held_item": ("Dim_Item", "item_sk"),
+    "ability": ("Dim_Faehigkeit", "faehigkeit_sk"),
+}
+
+
+def _meta_merkmal(conn, anzeigename: str, tag: str,
+                  kategorie: str) -> tuple[str | None, str | None]:
+    """Meistgespieltes Item bzw. meistgespielte Faehigkeit am Berichtstag.
+
+    Rueckgabe: ``(slug, anzeigename)`` -- der Slug fuer die Rechnung, der Name
+    fuer den Steckbrief. Die Faehigkeit gehoert in die Rechnung, weil sie dort
+    ueber Immunitaeten und feste Multiplikatoren mitspielt (Schwebe,
+    Feuerfaenger, Kraftkoloss ...).
+    """
+    tabelle, schluessel = _MERKMAL_DIMENSION[kategorie]
+    zeile = conn.execute(f"""
+        SELECT d.slug, d.anzeigename
         FROM Fact_Champions_Merkmal f
         JOIN Dim_Pokemon p ON p.pokemon_sk = f.pokemon_sk
         JOIN Dim_Zeit    z ON z.zeit_sk    = f.zeit_sk
-        JOIN Dim_Item    i ON i.item_sk    = f.item_sk
+        JOIN {tabelle}   d ON d.{schluessel} = f.{schluessel}
         WHERE p.anzeigename = ? AND z.datum_iso = ?
-          AND f.kategorie = 'held_item' AND f.rang = 1
+          AND f.kategorie = ? AND f.rang = 1
         LIMIT 1
-    """, (anzeigename, tag)).fetchone()
-    return zeile[0] if zeile else None
+    """, (anzeigename, tag, kategorie)).fetchone()  # noqa: S608 -- Tabelle aus fester Liste
+    return (zeile[0], zeile[1]) if zeile else (None, None)
 
 
 def _meta_attacken(conn, anzeigename: str, tag: str) -> list[str]:
@@ -247,24 +275,58 @@ def _angriff_waehlen(conn, vorschlaege: list[str]) -> Angriff | None:
     spalten = st.columns([2, 1, 1, 1])
     with spalten[0]:
         wahl = st.selectbox("Attacke", geordnet, index=0 if bekannte else None,
+                            key="angriff_attacke", format_func=attacke_mit_deutsch,
                             placeholder="Attacke waehlen ...")
     if not wahl:
         return None
     zeile = attacken.loc[attacken["anzeigename"] == wahl].iloc[0]
 
     with spalten[1]:
-        wetter = st.selectbox("Wetter", ["-", "Regen", "Sonne"])
+        wetter = st.selectbox("Wetter", ["-", "Regen", "Sonne"], key="angriff_wetter")
+        terrain = st.selectbox(
+            "Terrain", ["-", *TERRAINS], key="angriff_terrain",
+            help="Wirkt nur auf Pokemon am Boden: Flug-Typen, Schwebe und "
+                 "Luftballon bleiben unberuehrt.")
     with spalten[2]:
         mehrfachziel = st.checkbox(
             "Mehrere Ziele",
             value=zeile["zielbereich"] in ("all-opponents", "all-other-pokemon"),
             help="Flaechenattacken verlieren im Doppelkampf ein Viertel Schaden, "
                  "wenn sie mehrere Ziele treffen.")
-        kritisch = st.checkbox("Kritischer Treffer")
+        kritisch = st.checkbox(
+            "Kritischer Treffer",
+            help="Ignoriert Schirme, Malusstufen des Angreifers und "
+                 "Bonusstufen des Verteidigers.")
     with spalten[3]:
         brand = st.checkbox("Angreifer verbrannt")
         schirm = st.checkbox("Schirm aktiv",
                              help="Reflektor bzw. Lichtschild auf der Zielseite.")
+
+    with st.expander("Weitere Umstaende: Statusstufen, Helfende Hand, Unheils-Faehigkeiten"):
+        weitere = st.columns([1, 1, 1])
+        with weitere[0]:
+            stufe_angriff = st.slider(
+                "Angriffsstufen", -6, 6, 0, key="angriff_stufe_an",
+                help="Statusstufen des angreifenden Werts: nach einem "
+                     "Schwerttanz +2, nach einem Bedroher -1.")
+        with weitere[1]:
+            stufe_verteidigung = st.slider(
+                "Verteidigungsstufen", -6, 6, 0, key="angriff_stufe_vert",
+                help="Statusstufen des verteidigenden Werts: nach einem "
+                     "Eisenabwehr +2, nach einem Ruestungsbruch -1.")
+        with weitere[2]:
+            helfende_hand = st.checkbox(
+                "Helfende Hand", key="angriff_helfende_hand",
+                help="Der Partner verstaerkt die Attacke um die Haelfte -- "
+                     "nur im Doppelkampf moeglich.")
+            unheil = st.multiselect(
+                "Unheils-Faehigkeiten auf dem Feld", list(UNHEIL_WIRKUNG),
+                key="angriff_unheil",
+                help="Die vier Faehigkeiten der Schatztruhe druecken je einen "
+                     "Kampfwert aller anderen Pokemon um ein Viertel -- "
+                     "Unheilsschwert die Verteidigung, Unheilsjuwelen die "
+                     "Spezial-Verteidigung, Unheilstafeln den Angriff, "
+                     "Unheilsgefaess den Spezial-Angriff.")
 
     st.caption(f"{TYP_DEUTSCH.get(zeile['typ'], zeile['typ'])} · "
                f"{'physisch' if zeile['kategorie'] == 'physical' else 'speziell'} · "
@@ -274,5 +336,9 @@ def _angriff_waehlen(conn, vorschlaege: list[str]) -> Angriff | None:
         name=wahl, typ=zeile["typ"], kategorie=zeile["kategorie"],
         staerke=int(zeile["basisschaden"]),
         mehrfachziel=mehrfachziel, wetter=None if wetter == "-" else wetter,
+        terrain=None if terrain == "-" else terrain,
         kritisch=kritisch, brand=brand, schirm=schirm,
+        helfende_hand=helfende_hand,
+        stufe_angriff=stufe_angriff, stufe_verteidigung=stufe_verteidigung,
+        unheil=frozenset(unheil),
     )
