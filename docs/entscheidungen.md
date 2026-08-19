@@ -254,7 +254,50 @@ Nutzerdatenbank -- und genau die wird taeglich per `VACUUM INTO` gesichert
 
 ---
 
-## 10. Was bewusst nicht gebaut wurde
+## 10. Die Feedback-Runde: fünf Befunde, fünf Entscheidungen
+
+Eine Nutzerrückmeldung (August 2026) hat fünf Schwächen benannt; die
+Antworten darauf sind jeweils eine Entscheidung, kein Pflaster:
+
+* **„Manche Hypothesen sind banal."** Der Befund traf die Titel, nicht die
+  Prüfungen: H5, H8 und H9 haben ein durch die Spielregeln festgelegtes
+  Soll-Ergebnis — genau das macht sie zum Known-Answer-Test der eigenen
+  Datenkette. Diese Rolle war unsichtbar. Jetzt trägt jede Hypothese eine
+  **Art** (Erkenntnisfrage oder Datenprobe) und einen **Anwendungsfall**
+  („welche Entscheidung hängt am Ergebnis?"), die Titel sind Fragen, und ein
+  Test erzwingt beides dauerhaft. Verworfen: die banalen Prüfungen streichen —
+  dann stünde jede andere Auswertung ohne Beleg da, dass die Verarbeitung die
+  Spielrealität überhaupt abbildet.
+* **„Die Generationsstatistik zeigt nur 2026."** Stimmt zwingend: die
+  Zeitdimension beginnt mit dem ersten Champions-Tag. Die Frage „wie wuchs der
+  Pokédex?" spielt auf der Zeitachse der Hauptspiele (1996–2022), und die
+  steht in keiner Quelle. Sie liegt jetzt als eigene Regelbasis
+  (`bi.generationen`) neben der Typen-Matrix — Stammdaten ohne Quellsystem,
+  durch Tests gesichert. Verworfen: Erscheinungsdaten in die Zeitdimension
+  mischen; ein Faktentag 1999 ohne Fakten wäre Modellverschmutzung.
+* **„Namen bitte auf Deutsch."** Der englische Anzeigename bleibt der
+  Schlüssel zwischen den Quellsystemen; die deutsche Übersetzung (`name_de`
+  in vier Dimensionen, aus den PokeAPI-Übersetzungen) ist reine Beschriftung:
+  nicht im `row_hash`, wird fortgeschrieben statt getilgt, fällt bei fehlender
+  Übersetzung auf Englisch zurück statt zu raten. Auswahlfelder zeigen und
+  finden beide Namen. Verworfen: die Anwendung komplett umzustellen — dann
+  wäre jeder Abgleich mit der Quelle (die englisch liefert) ein Ratespiel.
+* **„Wo bekomme ich ein Pokémon in welcher Generation?"** Fundorte je
+  Spielstand pflegen Bisafans und PokéWiki seit Jahren in einer Tiefe, die
+  sich nicht sinnvoll ins Warehouse duplizieren lässt — und die dortigen
+  Artikel sind über den deutschen Namen präzise adressierbar. Der Pokédex
+  verlinkt deshalb, statt zu kopieren. Verworfen: die Encounter-Endpunkte der
+  PokeAPI als fünfte Quelle; hunderte Ressourcen je Spielversion für eine
+  Auskunft, die als Link besser altert.
+* **„Was ist mit Casuals?"** Der Pokédex ist die Antwort in Seitenform: voller
+  Bestand statt Ranked-Ausschnitt, Typen-Berater aus der Regelbasis (hilft
+  gegen jeden Arenaleiter, ganz ohne Meta), Steckbrief mit beiden
+  Wertesystemen. Die Turnierseiten bleiben unangetastet — eine Seite, die
+  beides gleichzeitig sein will, wäre keins von beidem.
+
+---
+
+## 11. Was bewusst nicht gebaut wurde
 
 * **Keine Nutzungsquote fuer Champions.** Die Quelle liefert keine; ein
   Platzhalter waere eine Erfindung. Stattdessen ordinale Kennzahlen und ein

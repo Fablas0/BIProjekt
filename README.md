@@ -44,11 +44,19 @@ vier der sechs Pokémon nehme ich im Team-Preview mit?
 | Welche Typen und Items setzen sich durch? | Trendanalysen auf der Archiv-Zeitreihe |
 | Spielen andere Länder anders? | Länderhypothese auf den TCG-Turnierdaten (H11) |
 | Überträgt sich Stärke zwischen den Spielen? | Spielübergreifende Hypothesen (H12, H13) |
+| Was ist das für ein Pokémon, und wo bekomme ich es? | Pokédex mit Steckbrief, Typen-Berater und Fundort-Links |
 | **Welche 4 nehme ich mit?** | **Team-Preview-Advisor** |
 
 Jede dieser Fragen ist entweder eine Kennzahl im Dashboard oder — wo eine
 Behauptung im Raum steht — eine **Hypothese** mit Nullhypothese, Verfahren,
 Effektstärke und Holm-Bonferroni-korrigierter Entscheidung.
+
+Die vorletzte Frage ist bewusst keine Turnierfrage: Der **Pokédex** führt den
+vollständigen Bestand der Hauptspiele — nicht nur das Champions-Ranked — mit
+Typen-Berater und Fundort-Links zu Bisafans und PokéWiki, und alle
+Auswahlfelder der Anwendung verstehen neben den englischen auch die deutschen
+Namen aus den PokeAPI-Übersetzungen. Damit trägt die Anwendung auch für
+Gelegenheitsspieler ohne Ranked-Ambition.
 
 ---
 
@@ -599,6 +607,7 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 ├── src/bi/
 │   ├── config.py                 zentrale Konfiguration
 │   ├── typechart.py              Typen-Regelbasis
+│   ├── generationen.py           Erscheinungsdaten der Spielgenerationen
 │   ├── stats.py                  Statuspunkte, Wesen, Initiative-Szenarien
 │   ├── warehouse.py              Schema-DDL, Sichten, Verbindung, Migration
 │   ├── nutzerdaten.py            Konten, PC-System, Teams (eigene Datenbank)
@@ -631,7 +640,6 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 ├── deploy/jetson/                Betrieb unter bi.fablas.org (systemd, Tunnel)
 ├── docs/entscheidungen.md        Warum so? Gedankengang je Use-Case
 ├── tests/                        Tests (pytest)
-└── .github/workflows/            CI und täglicher Ladelauf
 └── .github/workflows/            CI und täglicher Ladelauf
 ```
 
