@@ -79,6 +79,7 @@ SEITEN = [
     "Speed-Tiers",
     "Schadensrechner",
     "PC-System",
+    "Pokedex",
     "OLAP-Explorer",
     "Meta-Playbook",
     "Spielformen",
@@ -199,6 +200,49 @@ def test_speedtiers_benchmark_rechner() -> None:
     app.selectbox(key="bench_angreifer").set_value(angreifer.options[0]).run()
     app.selectbox(key="bench_ziel").set_value(angreifer.options[1]).run()
     assert not app.exception, f"Ausnahme im Benchmark-Rechner: {app.exception}"
+
+
+def test_pokedex_steckbrief_und_statistik() -> None:
+    """Der Pokedex muss Steckbrief, Typen-Berater und Statistik aufbauen.
+
+    Erst mit gewaehltem Pokemon laufen Nachschlage-Links, Typenrechnung und
+    Meta-Einordnung tatsaechlich.
+    """
+    app = _starte("Pokedex")
+    assert not app.exception, f"Ausnahme beim Aufbau: {app.exception}"
+
+    auswahl = app.selectbox(key="pokedex_wahl")
+    assert len(auswahl.options) > 500, "Der Pokedex muss den vollen Bestand fuehren."
+
+    app.selectbox(key="pokedex_wahl").set_value(auswahl.options[0]).run()
+    assert not app.exception, f"Ausnahme im Steckbrief: {app.exception}"
+
+
+def test_schadensrechner_rechnet_ein_meta_duell() -> None:
+    """Der Rechner muss zwei Meta-Sets gegeneinander durchrechnen.
+
+    Erst mit beiden Seiten und einer Attacke laeuft die Schadensformel samt
+    Item, Faehigkeit und den Umstaenden (Stufen, Terrain) tatsaechlich.
+    """
+    app = _starte("Schadensrechner")
+    assert not app.exception, f"Ausnahme beim Aufbau: {app.exception}"
+
+    angreifer = app.selectbox(key="angreifer_meta")
+    assert len(angreifer.options) >= 2, "Zu wenige Meta-Pokemon fuer den Test."
+    app.selectbox(key="angreifer_meta").set_value(angreifer.options[0]).run()
+    app.selectbox(key="verteidiger_meta").set_value(angreifer.options[1]).run()
+    assert not app.exception, f"Ausnahme bei der Kaempferwahl: {app.exception}"
+
+    attacke = app.selectbox(key="angriff_attacke")
+    assert attacke.options, "Keine Attacken-Stammdaten geladen."
+    app.selectbox(key="angriff_attacke").set_value(attacke.options[0]).run()
+    assert not app.exception, f"Ausnahme bei der Rechnung: {app.exception}"
+
+    # Die Umstaende muessen die Rechnung veraendern koennen, ohne zu brechen.
+    app.slider(key="angriff_stufe_an").set_value(2).run()
+    assert not app.exception, f"Ausnahme mit Statusstufen: {app.exception}"
+    app.selectbox(key="angriff_terrain").set_value("Elektrofeld").run()
+    assert not app.exception, f"Ausnahme mit Terrain: {app.exception}"
 
 
 def test_preview_advisor_mit_zwei_teams() -> None:

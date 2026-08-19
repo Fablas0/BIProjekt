@@ -34,6 +34,7 @@ from bi.ui import (  # noqa: E402
     seite_olap,
     seite_pc,
     seite_playbook,
+    seite_pokedex,
     seite_preview,
     seite_schaden,
     seite_scouting,
@@ -52,6 +53,7 @@ SEITEN = {
     "Speed-Tiers": seite_speedtiers.zeichne,
     "Schadensrechner": seite_schaden.zeichne,
     "PC-System": seite_pc.zeichne,
+    "Pokedex": seite_pokedex.zeichne,
     "OLAP-Explorer": seite_olap.zeichne,
     "Meta-Playbook": seite_playbook.zeichne,
     "Spielformen": seite_spielformen.zeichne,
@@ -59,9 +61,10 @@ SEITEN = {
     "ETL & Datenqualitaet": seite_etl.zeichne,
 }
 
-# Acht gleichrangige Eintraege sind eine Liste, keine Gliederung. Die Gruppierung
-# nach Arbeitsschritt macht die Reihenfolge lesbar: erst das Format verstehen,
-# dann das Team vorbereiten, dann vertiefen -- der Betrieb steht abseits.
+# Vierzehn gleichrangige Eintraege waeren eine Liste, keine Gliederung. Die
+# Gruppierung nach Arbeitsschritt macht die Reihenfolge lesbar: erst das Format
+# verstehen, dann das Team vorbereiten, dann nachschlagen und vertiefen -- der
+# Betrieb steht abseits.
 NAVIGATION: dict[str, list[tuple[str, str]]] = {
     "Ueberblick": [
         ("Meta-Cockpit", "Rangliste, Stabilitaet und Bewegung im Format"),
@@ -76,6 +79,9 @@ NAVIGATION: dict[str, list[tuple[str, str]]] = {
     ],
     "Eigener Bestand": [
         ("PC-System", "Eigene Pokemon, Sets und Teams -- dauerhaft gespeichert"),
+    ],
+    "Nachschlagen": [
+        ("Pokedex", "Steckbrief, Typen-Berater und Fundort-Links -- ohne Ranked-Bezug nutzbar"),
     ],
     "Vertiefung": [
         ("OLAP-Explorer", "Wuerfel frei navigieren: Slice, Dice, Drill-Down"),
