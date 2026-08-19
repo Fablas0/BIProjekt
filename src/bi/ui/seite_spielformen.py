@@ -58,17 +58,38 @@ def zeichne() -> None:
     if not go_geladen and not tcg_geladen:
         st.info(
             "**Die Spielform-Quellen sind noch nicht geladen.**\n\n"
-            "Beide werden vom taeglichen ETL-Lauf mitgeholt: Pokemon GO ohne "
-            "weitere Einrichtung, das Sammelkartenspiel mit API-Schluessel "
+            "Beide werden vom taeglichen ETL-Lauf mitgeholt und wie die "
+            "Champions-Daten im versionierten Archiv gesichert; die Cloud "
+            "baut sie daraus beim Start auf. Pokemon GO braucht keine "
+            "Einrichtung, das Sammelkartenspiel einen API-Schluessel "
             "(`VGC_BI_TCG_SCHLUESSEL`, kostenlos bei play.limitlesstcg.com). "
-            "Kopfstart: `python -m scripts.etl_lauf --nur-champions`."
+            "Kopfstart: `python -m scripts.etl_lauf`."
         )
         return
 
+    # Fehlt nur eine der beiden Quellen, erklaert sich die Luecke an Ort und
+    # Stelle -- eine kommentarlos fehlende Spielform liest sich sonst als
+    # kaputte Seite, nicht als fehlender Schluessel.
     if go_geladen:
         _go_bereich(conn)
+    else:
+        st.info(
+            "**Pokemon GO ist noch nicht geladen.** Die pvpoke-Rangliste wird "
+            "vom naechsten ETL-Lauf ohne weitere Einrichtung mitgeholt und im "
+            "Archiv gesichert."
+        )
     if tcg_geladen:
         _tcg_bereich(conn)
+    else:
+        st.info(
+            "**Das Sammelkartenspiel ist noch nicht geladen.** Die "
+            "Limitless-Turnierdaten verlangen einen kostenlosen API-Schluessel "
+            "(`VGC_BI_TCG_SCHLUESSEL`, Registrierung bei play.limitlesstcg.com). "
+            "Ohne ihn ueberspringt der Lauf genau diese Strecke und weist das "
+            "im Qualitaetsbericht aus -- die uebrigen Spielformen bleiben "
+            "davon unberuehrt. Damit entfaellt hier auch der Laendervergleich "
+            "(H11), denn nur diese Quelle liefert den Ort des Spielers."
+        )
     if go_geladen:
         _bruecke(conn)
 
