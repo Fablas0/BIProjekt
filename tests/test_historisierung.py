@@ -101,6 +101,27 @@ def test_deutscher_name_wird_nachgetragen_und_fortgeschrieben(conn) -> None:
     assert zeile[0] == "Fuegro"
 
 
+def test_namensabzug_kennt_nur_vollstaendig_uebersetzte_spezies(conn) -> None:
+    """Der bedarfsgesteuerte Abzug darf nichts dauerhaft ueberspringen.
+
+    Eine Spezies gilt erst als uebersetzt, wenn **alle** ihre Formen den
+    deutschen Namen tragen -- sonst bekaeme eine neue Form einer bekannten
+    Spezies ihren Namen nie, weil die Spezies fuer immer uebersprungen wuerde.
+    """
+    load.lade_pokemon_dimension(conn, [
+        {**_pokemon(), "name_de": "Fuegro"},
+        _pokemon(slug="pikachu"),  # ohne Uebersetzung
+    ], stichtag="2026-01-01")
+
+    assert pipeline._uebersetzte_spezies(conn) == frozenset({"incineroar"})
+
+    # Eine zweite, unuebersetzte Form nimmt der Spezies das Uebersprungen-Sein.
+    neue_form = {**_pokemon(slug="incineroar-mega"), "spezies": "incineroar",
+                 "name_de": None}
+    load.lade_pokemon_dimension(conn, [neue_form], stichtag="2026-02-01")
+    assert pipeline._uebersetzte_spezies(conn) == frozenset()
+
+
 def test_balance_aenderung_eroeffnet_neuen_zeitraum(conn) -> None:
     """Der alte Zustand bleibt erhalten und wird sauber abgegrenzt."""
     load.lade_pokemon_dimension(conn, [_pokemon(attack=115)], stichtag="2026-01-01")

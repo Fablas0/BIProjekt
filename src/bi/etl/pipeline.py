@@ -52,6 +52,19 @@ class LaufErgebnis:
     historisierung: dict[str, int] = field(default_factory=dict)
 
 
+def _uebersetzte_spezies(conn: sqlite3.Connection) -> frozenset[str]:
+    """Spezies, deren saemtliche Formen bereits einen deutschen Namen tragen.
+
+    Sie brauchen keinen erneuten Namensabzug -- der Ladeschritt schreibt den
+    Bestand fort. Uebersetzt heisst ausdruecklich **alle** Formen: taucht eine
+    neue Form einer bekannten Spezies auf, faellt die Spezies zurueck in den
+    Abzug, und die neue Form bekommt ihren Namen beim naechsten Lauf statt nie.
+    """
+    return frozenset(z[0] for z in conn.execute(
+        "SELECT spezies FROM Dim_Pokemon WHERE ist_aktuell = 1 "
+        "GROUP BY spezies HAVING COUNT(*) = COUNT(name_de)"))
+
+
 def stammdaten_laden(conn: sqlite3.Connection, fortschritt: Fortschritt = _still,
                      stichtag: str | None = None) -> LaufErgebnis:
     """Laedt den Pokemon-Bestand aus der PokeAPI in ``Dim_Pokemon``.
@@ -65,12 +78,9 @@ def stammdaten_laden(conn: sqlite3.Connection, fortschritt: Fortschritt = _still
     try:
         load.lade_quelle(conn, "pokeapi")
 
-        # Bereits uebersetzte Spezies muessen nicht erneut abgerufen werden --
-        # der Namensabzug beschraenkt sich auf das Fehlende, im Regelbetrieb
-        # also auf nichts. Den Bestand schreibt der Ladeschritt fort.
-        uebersetzt = frozenset(z[0] for z in conn.execute(
-            "SELECT DISTINCT spezies FROM Dim_Pokemon "
-            "WHERE ist_aktuell = 1 AND name_de IS NOT NULL"))
+        # Der Namensabzug beschraenkt sich auf das Fehlende -- im Regelbetrieb
+        # also auf nichts, bis eine neue Spielgeneration oder Form erscheint.
+        uebersetzt = _uebersetzte_spezies(conn)
 
         with extract.sitzung() as s:
             abzug = extract.hole_pokemon_stammdaten(
