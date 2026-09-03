@@ -71,6 +71,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 SEITEN = [
+    "Start",
     "Meta-Cockpit",
     "Trends",
     "Team-Preview-Advisor",
@@ -84,21 +85,82 @@ SEITEN = [
     "Meta-Playbook",
     "Spielformen",
     "Hypothesen",
+    "GO-Meta",
+    "Sammelkartenspiel",
+    "Nuzlocke-Lauf",
+    "Spielstand",
+    "Shiny-Jagd",
     "ETL & Datenqualitaet",
 ]
 
 
 def _starte(seite: str | None = None):
-    """Fuehrt die Anwendung aus und waehlt optional eine Seite an."""
+    """Fuehrt die Anwendung aus und waehlt optional eine Seite an.
+
+    Die Navigation zeigt nur die Seiten der gewaehlten Spielweise; deshalb
+    wird vor dem Start die Spielweise gesetzt, in der die Seite steht -- so,
+    wie es die Startseite beim Klick auf eine Kachel tut.
+    """
     from streamlit.testing.v1 import AppTest
 
+    from bi.ui import spielweisen
+
     app = AppTest.from_file(str(WURZEL / "app.py"), default_timeout=180)
+    if seite and seite != SEITEN[0]:
+        app.session_state["spielweise"] = spielweisen.spielweise_fuer_seite(seite)
     app.run()
     if seite and seite != SEITEN[0]:
         # Die Navigation besteht aus einem Schaltknopf je Seite; der Schluessel
         # ist der Seitenname. Ein Auswahlfeld gibt es nicht mehr.
         app.button(key=f"nav_{seite}").click().run()
     return app
+
+
+def test_startseite_waehlt_die_spielweise() -> None:
+    """Ein Klick auf eine Kachel setzt die Spielweise und springt auf deren
+    erste Seite -- die Navigation zeigt danach deren Seiten."""
+    from bi.ui import spielweisen
+
+    app = _starte()
+    assert not app.exception
+    # Vor der Wahl: nur Start und Betrieb in der Navigation.
+    knoepfe = {str(k.key) for k in app.button if str(k.key or "").startswith("nav_")}
+    assert knoepfe == {"nav_Start", "nav_ETL & Datenqualitaet"}
+
+    app.button(key="spielweise_sammeln").click().run()
+    assert not app.exception, f"Ausnahme nach der Wahl: {app.exception}"
+    assert app.session_state["spielweise"] == "sammeln"
+    assert app.session_state["seite"] == spielweisen.SPIELWEISEN["sammeln"].startseite
+    knoepfe = {str(k.key) for k in app.button if str(k.key or "").startswith("nav_")}
+    assert "nav_Shiny-Jagd" in knoepfe
+    assert "nav_Meta-Cockpit" not in knoepfe
+
+
+def test_shiny_jagd_zaehlt_und_ordnet_ein() -> None:
+    """Eine Jagd anlegen, zaehlen, einordnen -- der Kern der Seite."""
+    app = _starte("Shiny-Jagd")
+    assert not app.exception, f"Ausnahme beim Aufbau: {app.exception}"
+
+    auswahl = app.selectbox(key="jagd_pokemon")
+    assert auswahl.options, "Keine Pokemon zur Auswahl."
+    app.selectbox(key="jagd_pokemon").set_value(auswahl.options[0]).run()
+    assert not app.exception, f"Ausnahme bei der Wahl: {app.exception}"
+
+
+def test_nuzlocke_seite_rendert_ohne_lauf() -> None:
+    app = _starte("Nuzlocke-Lauf")
+    assert not app.exception, f"Ausnahme ohne Lauf: {app.exception}"
+    app = _starte("Spielstand")
+    assert not app.exception, f"Ausnahme im Spielstand: {app.exception}"
+
+
+def test_go_meta_rangliste_und_suche() -> None:
+    app = _starte("GO-Meta")
+    assert not app.exception, f"Ausnahme beim Aufbau: {app.exception}"
+    if not any(str(s.key) == "go_liga" for s in app.selectbox):
+        pytest.skip("GO-Meta nicht geladen.")
+    app.text_input(key="go_suche").set_value("aza").run()
+    assert not app.exception, f"Ausnahme bei der Suche: {app.exception}"
 
 
 @pytest.mark.parametrize("seite", SEITEN)

@@ -243,20 +243,23 @@ _GANZZAHLSPALTEN = frozenset({
     "Immun", "Erfasste Sets", "Erfasste Pokemon", "Gefaehrdete Mitglieder",
     "Lauf", "Initiative", "Grundwert", "Ohne Investition", "Basiswertsumme",
     "Initiative (ohne Investition)",
+    # Zaehlungen der eigenen Datenhaltung: Jagden, Spielstaende, Sammlung.
+    "Versuche", "Erwartungswert", "Median", "Orden", "Stufe", "Nr.", "Anzahl",
+    "Spieler", "Top 8", "Schwach", "Widerstand",
 })
 
 # Nachkommastellen je Spalte, wo die Vorgabe zu grob oder zu fein waere.
 _NACHKOMMA = {
     "Korrelation zum Start": "%.3f", "Korrelation zum Vortag": "%.3f",
     "Dauer (s)": "%.1f s", "Hoechster Faktor": "%.2f", "Konzentration": "%.2f",
-    "Mittlere Initiative": "%.1f",
+    "Mittlere Initiative": "%.1f", "Score": "%.1f", "Abstand zur Spitze": "%.1f",
 }
 
 # Bilanzgroessen mit Nullpunkt -- das Vorzeichen ist die eigentliche Aussage.
 _VORZEICHENSPALTEN = {
     "Veraenderung": "%+d", "Bewertung": "%+.2f", "Punktzahl": "%+.2f",
     "Gesamtwertung": "%+.2f", "Beitrag": "%+.2f", "Mittelwert": "%+.2f",
-    "Schlechtester Fall": "%+.2f",
+    "Schlechtester Fall": "%+.2f", "Bilanz": "%+d",
 }
 
 # Balken ueber einer festen Skala von 0 bis 100.

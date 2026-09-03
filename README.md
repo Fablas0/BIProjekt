@@ -1,7 +1,9 @@
-# VGC Business Intelligence
+# Pokémon Business Intelligence
 
-Business-Intelligence-Lösung für **Pokémon Champions**, die seit April 2026
-offizielle Wettkampfplattform des Pokémon-Turnierbetriebs.
+Business-Intelligence-Lösung rund um Pokémon — begonnen als Turnierwerkzeug
+für **Pokémon Champions**, die seit April 2026 offizielle Wettkampfplattform
+des Pokémon-Turnierbetriebs, und inzwischen ein Werkzeug für sechs Arten,
+Pokémon zu spielen.
 
 Das Projekt führt **vier Quellsysteme** in einem historisierten Data Warehouse
 zusammen: die täglichen Ranked-Daten von Pokémon Champions, die Stammdaten der
@@ -11,7 +13,13 @@ stehen ein Dashboard mit Kennzahlen, OLAP-Auswertung, Team-Analysen, einem
 Team-Preview-Advisor und einem Schadensrechner — sowie ein **Hypothesenkatalog**,
 der dreizehn vorab formulierte Aussagen statistisch prüft, statt sie zu
 behaupten. Ein PC-System mit Nutzerkonten speichert eigene Pokémon, Sets und
-Teams dauerhaft zwischen den Sitzungen.
+Teams dauerhaft zwischen den Sitzungen — und sagt, wo sie gerade kompetitiv
+einsetzbar sind.
+
+Beim Start wählt man eine **Spielweise**: Pokémon Champions, Pokémon GO,
+Sammelkartenspiel, Nuzlocke, Durchspielen oder Sammeln und Shiny-Jagd. Die
+Spielweise bestimmt, welche Seiten die Navigation zeigt; die Daten darunter
+sind dieselben. Siehe [Spielweisen](#spielweisen-sechs-arten-pokémon-zu-spielen).
 
 Warum die Dinge so gebaut sind, wie sie gebaut sind — je Use-Case der
 Gedankengang samt verworfener Alternativen — steht gesammelt in
@@ -57,6 +65,50 @@ Typen-Berater und Fundort-Links zu Bisafans und PokéWiki, und alle
 Auswahlfelder der Anwendung verstehen neben den englischen auch die deutschen
 Namen aus den PokeAPI-Übersetzungen. Damit trägt die Anwendung auch für
 Gelegenheitsspieler ohne Ranked-Ambition.
+
+---
+
+## Spielweisen: sechs Arten, Pokémon zu spielen
+
+Wer eine Nuzlocke-Herausforderung auf Platin spielt, braucht keinen
+Speed-Tier-Rechner für das Ranked von 2026. Die Startseite fragt deshalb
+zuerst „Was spielst du heute?" und blendet danach nur die Seiten ein, die zur
+Antwort gehören (`bi.ui.spielweisen`). Wechseln geht jederzeit in der
+Seitenleiste; die Betriebsseite steht in jeder Spielweise.
+
+| Spielweise | Leitfrage | Seiten |
+|---|---|---|
+| **Pokémon Champions** | Wie bereite ich mich auf das Ranked vor? | Meta-Cockpit, Trends, Team-Preview-Advisor, Gegner-Scouting, Team-Builder, Speed-Tiers, Schadensrechner, PC-System, Pokédex, OLAP-Explorer, Meta-Playbook, Spielformen, Hypothesen |
+| **Pokémon GO** | Was lohnt sich gerade in den PvP-Ligen? | GO-Meta (Ranglisten je Liga, Suche, Abgleich mit der eigenen Box), PC-System, Pokédex, Spielformen |
+| **Sammelkartenspiel** | Welche Decks werden gespielt, und was habe ich davon? | Sammelkartenspiel (Turnier-Meta nach Deck und Region, eigene Kartensammlung mit Brücke zur Meta), Pokédex, Spielformen |
+| **Nuzlocke** | Überlebt mein Team den nächsten Arenaleiter? | Nuzlocke-Lauf (Begegnungen, Team, Friedhof, Typen-Lücken), Pokédex, PC-System |
+| **Durchspielen** | Wo stehe ich in meinem Spiel, und was fehlt noch? | Spielstand (Team, Orden, Begegnungen), Pokédex, PC-System |
+| **Sammeln und Shiny-Jagd** | Wie viele Versuche noch — und bin ich ein Pechvogel? | Shiny-Jagd (Zähler, Einordnung, Rechner), PC-System, Pokédex |
+
+**Shiny-Jagd.** Je Jagd ein Zähler, dazu die Methode aus einer eigenen
+Regelbasis (`bi.shiny`): Zufallsbegegnung, Schillerpin, Masuda-Methode,
+SOS-Kette, Funkel-Kraft, Massenauftreten, Pokémon-GO-Raten. Die
+Wahrscheinlichkeiten folgen aus den durch Datamining belegten Wurfzahlen —
+„Masuda 1 zu 683" ist das Ergebnis von sechs Würfen mit 1/4096. Der
+Zählerstand wird gegen die geometrische Verteilung eingeordnet: nicht als
+Urteil, sondern als Anteil („rund 63 Prozent aller Jäger waren bis hier
+fündig"). Ein gefundenes Shiny landet auf Wunsch direkt in der Box, mit
+Kennzeichen und Herkunft.
+
+**Nuzlocke und Durchspielen.** Ein Lauf je Edition (`bi.spielstand`), mit
+Orden, Begegnungen und deren Verbleib: Team, Box, gefallen, entkommen. Ein
+Nuzlocke-Lauf trägt seine Regeln als Liste; die Datenschicht setzt die erste
+durch (nur die erste Begegnung je Ort zählt), verlangt den Spitznamen und
+lässt ein gefallenes Pokémon nicht zurückkehren. Die Auswertung ist die eines
+Arenaleiter-Kampfes: welche Angriffstypen das Team gemeinsam verwundbar
+machen, aus der Typen-Regelbasis — ganz ohne Ranked-Daten.
+
+**Einsatzcheck.** Das PC-System hält jede Box gegen alle drei Spielformen
+(`bi.analytics.einsatz`): Champions nach Rang im Ranked (bis Rang 50
+Meta-relevant, darüber spielbar, ohne Eintrag kein Einsatz), Pokémon GO nach
+dem Score der besten Liga, Sammelkartenspiel danach, ob das Pokémon ein
+Turnierdeck anführt. Zu jedem Pokémon und jeder Spielform gibt es genau einen
+Befund — auch dann, wenn die Quelle nichts führt oder nicht geladen ist.
 
 ---
 
@@ -611,6 +663,9 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 │   ├── stats.py                  Statuspunkte, Wesen, Initiative-Szenarien
 │   ├── warehouse.py              Schema-DDL, Sichten, Verbindung, Migration
 │   ├── nutzerdaten.py            Konten, PC-System, Teams (eigene Datenbank)
+│   ├── shiny.py                  Shiny-Wahrscheinlichkeiten, Einordnung, Jagden
+│   ├── spielstand.py             Durchspielen und Nuzlocke: Läufe, Begegnungen
+│   ├── sammlung.py               Kartensammlung des Sammelkartenspiels
 │   ├── quality.py                20 Qualitätsregeln
 │   ├── etl/
 │   │   ├── extract.py            PokeAPI: Pokémon, Attacken, Items, Fähigkeiten
@@ -634,8 +689,9 @@ Prüfung übersetzt die Cloud pandas aus dem Quelltext — der Aufbau dauert dan
 │   │   ├── schaden.py            Schadensformel der Hauptspiele
 │   │   ├── speed.py              Speed-Tiers, Szenarien, Benchmark
 │   │   ├── threat.py             Bedrohungs- und Abdeckungsanalyse
+│   │   ├── einsatz.py            Einsatzcheck der Box über alle Spielformen
 │   │   └── preview.py            Team-Preview-Advisor
-│   └── ui/                       vierzehn Seitenmodule, Anmeldung, Design
+│   └── ui/                       Spielweisen, zwanzig Seitenmodule, Anmeldung, Design
 ├── scripts/                      kopflose ETL-, Prüf- und Hypothesenläufe
 ├── deploy/jetson/                Betrieb unter bi.fablas.org (systemd, Tunnel)
 ├── docs/entscheidungen.md        Warum so? Gedankengang je Use-Case

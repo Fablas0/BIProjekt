@@ -65,6 +65,9 @@ GRUEN = "#2ECC71"
 # Verteilung des Metagames, vor der eine eigene Auswahl eingeordnet wird.
 GRAU_FLAECHE = "#4A5568"
 GRAU_MITTE = "#8A8F98"
+# Dieselbe Hintergrundflaeche, durchscheinend -- fuer gefuellte Kurven, unter
+# denen das Gitter sichtbar bleiben soll.
+GRAU_FLAECHE_TRANSPARENT = "rgba(138, 143, 152, 0.18)"
 
 # Schrift auf einer eingefaerbten Flaeche. Die 18 Typenfarben sind durchweg
 # kraeftig genug, dass Weiss darauf lesbar bleibt.

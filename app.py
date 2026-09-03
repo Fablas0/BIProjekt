@@ -1,10 +1,15 @@
-"""VGC Business Intelligence -- Einstiegspunkt der Streamlit-Anwendung.
+"""Pokemon Business Intelligence -- Einstiegspunkt der Streamlit-Anwendung.
 
-Business-Intelligence-Loesung fuer Pokemon Champions, die seit April 2026
-offizielle Wettkampfplattform. Die Anwendung laedt die taeglichen Ranked-Daten,
-reichert sie mit Stammdaten der PokeAPI an, archiviert sie dauerhaft und stellt
-darauf ein Dashboard mit Kennzahlen, OLAP-Auswertung, Team-Analysen und einem
-Team-Preview-Advisor bereit.
+Begonnen als Business-Intelligence-Loesung fuer Pokemon Champions, die seit
+April 2026 offizielle Wettkampfplattform. Die Anwendung laedt die taeglichen
+Ranked-Daten, reichert sie mit Stammdaten der PokeAPI an, archiviert sie
+dauerhaft und stellt darauf ein Dashboard mit Kennzahlen, OLAP-Auswertung,
+Team-Analysen und einem Team-Preview-Advisor bereit.
+
+Inzwischen bedient sie sechs **Spielweisen** (:mod:`bi.ui.spielweisen`):
+Champions, Pokemon GO, Sammelkartenspiel, Nuzlocke, Durchspielen sowie
+Sammeln und Shiny-Jagd. Die Spielweise waehlt aus, welche Seiten die
+Navigation zeigt; die Seiten selbst sind davon unabhaengig.
 
 Start:
     streamlit run app.py
@@ -13,6 +18,7 @@ Start:
 from __future__ import annotations
 
 import sys
+from functools import partial
 from pathlib import Path
 
 import streamlit as st
@@ -30,6 +36,7 @@ from bi.ui import (  # noqa: E402
     komponenten,
     seite_cockpit,
     seite_etl,
+    seite_go,
     seite_hypothesen,
     seite_olap,
     seite_pc,
@@ -38,13 +45,21 @@ from bi.ui import (  # noqa: E402
     seite_preview,
     seite_schaden,
     seite_scouting,
+    seite_shiny,
     seite_speedtiers,
     seite_spielformen,
+    seite_spielstand,
+    seite_start,
+    seite_tcg,
     seite_teambuilder,
     seite_trends,
+    spielweisen,
 )
 
+START = "Start"
+
 SEITEN = {
+    START: seite_start.zeichne,
     "Meta-Cockpit": seite_cockpit.zeichne,
     "Trends": seite_trends.zeichne,
     "Team-Preview-Advisor": seite_preview.zeichne,
@@ -58,54 +73,37 @@ SEITEN = {
     "Meta-Playbook": seite_playbook.zeichne,
     "Spielformen": seite_spielformen.zeichne,
     "Hypothesen": seite_hypothesen.zeichne,
+    "GO-Meta": seite_go.zeichne,
+    "Sammelkartenspiel": seite_tcg.zeichne,
+    "Nuzlocke-Lauf": partial(seite_spielstand.zeichne, "nuzlocke"),
+    "Spielstand": partial(seite_spielstand.zeichne, "normal"),
+    "Shiny-Jagd": seite_shiny.zeichne,
     "ETL & Datenqualitaet": seite_etl.zeichne,
-}
-
-# Vierzehn gleichrangige Eintraege waeren eine Liste, keine Gliederung. Die
-# Gruppierung nach Arbeitsschritt macht die Reihenfolge lesbar: erst das Format
-# verstehen, dann das Team vorbereiten, dann nachschlagen und vertiefen -- der
-# Betrieb steht abseits.
-NAVIGATION: dict[str, list[tuple[str, str]]] = {
-    "Ueberblick": [
-        ("Meta-Cockpit", "Rangliste, Stabilitaet und Bewegung im Format"),
-        ("Trends", "Typen, Items, Neuzugaenge und Dauerbrenner im Verlauf"),
-    ],
-    "Vor dem Kampf": [
-        ("Team-Preview-Advisor", "Welche vier von sechs nehme ich mit?"),
-        ("Gegner-Scouting", "Womit ist bei diesem Gegner zu rechnen?"),
-        ("Team-Builder", "Wo ist mein Team angreifbar?"),
-        ("Speed-Tiers", "Wer handelt zuerst?"),
-        ("Schadensrechner", "Ueberlebt mein Pokemon diesen Treffer?"),
-    ],
-    "Eigener Bestand": [
-        ("PC-System", "Eigene Pokemon, Sets und Teams -- dauerhaft gespeichert"),
-    ],
-    "Nachschlagen": [
-        ("Pokedex", "Steckbrief, Typen-Berater und Fundort-Links -- ohne Ranked-Bezug nutzbar"),
-    ],
-    "Vertiefung": [
-        ("OLAP-Explorer", "Wuerfel frei navigieren: Slice, Dice, Drill-Down"),
-        ("Meta-Playbook", "Verdichtete Handlungsempfehlungen"),
-        ("Spielformen", "VGC, Pokemon GO und Sammelkartenspiel im Vergleich"),
-        ("Hypothesen", "Vorab formulierte Aussagen, statistisch geprueft"),
-    ],
-    "Betrieb": [
-        ("ETL & Datenqualitaet", "Ladelaeufe, Archiv und Qualitaetsbericht"),
-    ],
 }
 
 
 def _navigation() -> str:
-    """Seitenauswahl als anklickbare Kaesten.
+    """Seitenauswahl als anklickbare Kaesten, gegliedert nach Spielweise.
 
     Ein Auswahlfeld verlangt zwei Handgriffe und verbirgt die uebrigen
-    Moeglichkeiten. Als Kaesten sind alle Seiten samt ihrer Aufgabe sichtbar,
-    und ein Klick genuegt.
+    Moeglichkeiten. Als Kaesten sind alle Seiten der gewaehlten Spielweise
+    samt ihrer Aufgabe sichtbar, und ein Klick genuegt. Ohne gewaehlte
+    Spielweise bleibt nur der Start -- die Wahl ist die erste Handlung.
     """
-    st.session_state.setdefault("seite", next(iter(SEITEN)))
+    st.session_state.setdefault("seite", START)
+    schluessel = st.session_state.get("spielweise")
+    spielweise = spielweisen.SPIELWEISEN.get(schluessel) if schluessel else None
 
-    for gruppe, eintraege in NAVIGATION.items():
-        st.markdown(f"<div class='nav-gruppe'>{gruppe}</div>", unsafe_allow_html=True)
+    gruppen: list[tuple[str, tuple[tuple[str, str], ...]]] = [
+        ("", ((START, "Spielweise waehlen oder wechseln"),)),
+    ]
+    if spielweise:
+        gruppen.extend(spielweise.navigation)
+    gruppen.append(("Betrieb", spielweisen.BETRIEB))
+
+    for gruppe, eintraege in gruppen:
+        if gruppe:
+            st.markdown(f"<div class='nav-gruppe'>{gruppe}</div>", unsafe_allow_html=True)
         for name, aufgabe in eintraege:
             aktiv = st.session_state["seite"] == name
             if st.button(name, key=f"nav_{name}", help=aufgabe, width="stretch",
@@ -113,12 +111,36 @@ def _navigation() -> str:
                 st.session_state["seite"] = name
                 st.rerun()
 
+    # Eine Seite, die zur Spielweise nicht mehr gehoert -- etwa nach einem
+    # Wechsel in der Seitenleiste -- faellt auf den Start zurueck.
+    erlaubt = {START, *spielweisen.BETRIEB_SEITEN}
+    if spielweise:
+        erlaubt.update(spielweise.seiten)
+    if st.session_state["seite"] not in erlaubt:
+        st.session_state["seite"] = spielweise.startseite if spielweise else START
     return st.session_state["seite"]
+
+
+def _spielweisenwahl() -> None:
+    """Wechsel der Spielweise in der Seitenleiste."""
+    schluessel = list(spielweisen.SPIELWEISEN)
+    aktuell = st.session_state.get("spielweise")
+    gewaehlt = st.selectbox(
+        "Spielweise", schluessel,
+        index=schluessel.index(aktuell) if aktuell in schluessel else None,
+        format_func=lambda k: spielweisen.SPIELWEISEN[k].name,
+        placeholder="Noch nicht gewaehlt",
+        help="Die Spielweise bestimmt, welche Seiten die Navigation zeigt.",
+    )
+    if gewaehlt and gewaehlt != aktuell:
+        st.session_state["spielweise"] = gewaehlt
+        st.session_state["seite"] = spielweisen.SPIELWEISEN[gewaehlt].startseite
+        st.rerun()
 
 
 def main() -> None:
     st.set_page_config(
-        page_title="VGC Business Intelligence",
+        page_title="Pokemon Business Intelligence",
         page_icon="◆",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -139,9 +161,10 @@ def main() -> None:
         return
 
     with st.sidebar:
-        st.markdown("## VGC Business Intelligence")
-        st.caption("Data Warehouse und Analytics fuer Pokemon Champions")
+        st.markdown("## Pokemon Business Intelligence")
+        st.caption("Champions, GO, Sammelkartenspiel, Hauptspiele und Shiny-Jagd")
 
+        _spielweisenwahl()
         seite = _navigation()
         st.markdown("---")
 
@@ -240,9 +263,10 @@ def _zeige_status() -> None:
         "Kennzahlen sind entsprechend ordinal ausgelegt."
     )
     st.caption(
-        "Quellen: Pokemon Champions Battle Data (Bewegungsdaten) und PokeAPI "
-        "(Stammdaten). Die Anwendung steht in keiner Verbindung zu Nintendo, "
-        "Game Freak oder The Pokemon Company."
+        "Quellen: Pokemon Champions Battle Data (Bewegungsdaten), PokeAPI "
+        "(Stammdaten), pvpoke (Pokemon GO) und Limitless (Sammelkartenspiel). "
+        "Die Anwendung steht in keiner Verbindung zu Nintendo, Game Freak, "
+        "Niantic oder The Pokemon Company."
     )
 
 

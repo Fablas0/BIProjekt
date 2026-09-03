@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.Box_Pokemon (
     punkte_speed      INTEGER NOT NULL DEFAULT 0,
     attacken          TEXT    NOT NULL DEFAULT '[]',   -- JSON-Liste kompakter Schluessel
     notiz             TEXT,
+    ist_shiny         INTEGER NOT NULL DEFAULT 0,
+    herkunft          TEXT,                  -- Spiel, aus dem das Pokemon stammt
     angelegt_am       TEXT    NOT NULL,
     geaendert_am      TEXT    NOT NULL
 );
@@ -141,7 +143,98 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.Einstellung (
     schluessel TEXT PRIMARY KEY,
     wert       TEXT NOT NULL
 );
+
+-- Shiny-Jagden: ein Zaehler je Jagd. Die Methode ist ein Schluessel der
+-- Regelbasis in ``bi.shiny``; aus ihr folgt die Wahrscheinlichkeit, gegen die
+-- der Zaehlerstand eingeordnet wird. Der Stand selbst ist eine Zaehlung --
+-- Summen darueber sind zulaessig, anders als bei den Raengen des Warehouse.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.Shiny_Jagd (
+    jagd_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    nutzer_id    INTEGER NOT NULL REFERENCES Nutzer (nutzer_id) ON DELETE CASCADE,
+    slug         TEXT    NOT NULL,          -- natuerlicher Schluessel zu Dim_Pokemon
+    spiel        TEXT    NOT NULL,
+    methode      TEXT    NOT NULL,          -- Schluessel aus bi.shiny.METHODEN
+    versuche     INTEGER NOT NULL DEFAULT 0,
+    status       TEXT    NOT NULL DEFAULT 'laeuft',   -- laeuft | gefunden | abgebrochen
+    notiz        TEXT,
+    begonnen_am  TEXT    NOT NULL,
+    beendet_am   TEXT,
+    geaendert_am TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS {SCHEMA}.ix_jagd_nutzer ON Shiny_Jagd (nutzer_id, status);
+
+-- Spielstaende der Hauptspiele: ein Durchgang je Edition, wahlweise nach
+-- Nuzlocke-Regeln. Die Regeln liegen als JSON am Lauf, damit ein Lauf die
+-- Regeln behaelt, unter denen er begonnen wurde, auch wenn die Vorgabe
+-- spaeter geaendert wird.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.Spielstand_Lauf (
+    lauf_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    nutzer_id    INTEGER NOT NULL REFERENCES Nutzer (nutzer_id) ON DELETE CASCADE,
+    name         TEXT    NOT NULL,
+    spiel        TEXT    NOT NULL,          -- Edition, z. B. 'Platin'
+    art          TEXT    NOT NULL DEFAULT 'normal',   -- normal | nuzlocke
+    regeln       TEXT    NOT NULL DEFAULT '[]',       -- JSON-Liste der Regelschluessel
+    orden        INTEGER NOT NULL DEFAULT 0,
+    status       TEXT    NOT NULL DEFAULT 'laeuft',   -- laeuft | abgeschlossen | gescheitert
+    notiz        TEXT,
+    angelegt_am  TEXT    NOT NULL,
+    geaendert_am TEXT    NOT NULL,
+    UNIQUE (nutzer_id, name)
+);
+
+-- Jede Begegnung eines Laufs: Ort, Pokemon und was daraus wurde. Im
+-- Nuzlocke zaehlt die erste Begegnung je Ort -- die Eindeutigkeit wird in
+-- ``bi.spielstand`` geprueft, nicht hier, weil sie nur fuer diese Art gilt.
+CREATE TABLE IF NOT EXISTS {SCHEMA}.Spielstand_Begegnung (
+    begegnung_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lauf_id      INTEGER NOT NULL REFERENCES Spielstand_Lauf (lauf_id) ON DELETE CASCADE,
+    ort          TEXT    NOT NULL,
+    slug         TEXT    NOT NULL,          -- natuerlicher Schluessel zu Dim_Pokemon
+    spitzname    TEXT,
+    stufe        INTEGER,
+    status       TEXT    NOT NULL DEFAULT 'team',   -- team | box | tot | entkommen | besiegt
+    reihenfolge  INTEGER NOT NULL,
+    notiz        TEXT,
+    angelegt_am  TEXT    NOT NULL,
+    geaendert_am TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS {SCHEMA}.ix_begegnung_lauf ON Spielstand_Begegnung (lauf_id, status);
+
+-- Kartensammlung des Sammelkartenspiels. Es gibt keine angebundene
+-- Kartenstammdatenquelle; Satz, Nummer und Name sind deshalb Freitext. Der
+-- optionale Pokemon-Schluessel schlaegt die Bruecke zur konformen Dimension
+-- und damit zur Turnier-Meta (Leit-Pokemon der Decks).
+CREATE TABLE IF NOT EXISTS {SCHEMA}.Karte (
+    karte_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    nutzer_id    INTEGER NOT NULL REFERENCES Nutzer (nutzer_id) ON DELETE CASCADE,
+    satz         TEXT    NOT NULL,
+    nummer       TEXT,
+    name         TEXT    NOT NULL,
+    slug         TEXT,                      -- natuerlicher Schluessel zu Dim_Pokemon
+    anzahl       INTEGER NOT NULL DEFAULT 1,
+    seltenheit   TEXT,
+    zustand      TEXT,
+    notiz        TEXT,
+    angelegt_am  TEXT    NOT NULL,
+    geaendert_am TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS {SCHEMA}.ix_karte_nutzer ON Karte (nutzer_id, satz);
 """
+
+# Spalten, die nach der ersten Fassung hinzugekommen sind. Die Nutzerdatenbank
+# ist -- anders als das Warehouse -- nicht wiederbeschaffbar; ein ``CREATE
+# TABLE IF NOT EXISTS`` allein liesse bestehende Dateien ohne die neue Spalte
+# zurueck. Ergaenzt wird ausschliesslich, nie umbenannt oder entfernt, damit
+# der Schritt gefahrlos bei jedem Anhaengen laufen kann.
+NACHGEREICHTE_SPALTEN: dict[str, dict[str, str]] = {
+    "Box_Pokemon": {
+        "ist_shiny": "INTEGER NOT NULL DEFAULT 0",
+        "herkunft": "TEXT",              # Spiel, aus dem das Pokemon stammt
+    },
+}
 
 
 def _jetzt() -> str:
@@ -168,7 +261,22 @@ def anhaengen(conn: sqlite3.Connection, pfad: Path | str | None = None) -> None:
 
     conn.execute("ATTACH DATABASE ? AS " + SCHEMA, (str(ziel),))
     conn.executescript(NUTZER_DDL)
+    _spalten_nachziehen(conn)
     conn.commit()
+
+
+def _spalten_nachziehen(conn: sqlite3.Connection) -> list[str]:
+    """Ergaenzt fehlende Spalten in bereits bestehenden Tabellen."""
+    ergaenzt: list[str] = []
+    for tabelle, spalten in NACHGEREICHTE_SPALTEN.items():
+        vorhanden = {z[1] for z in conn.execute(f"PRAGMA {SCHEMA}.table_info({tabelle})")}
+        for spalte, typ in spalten.items():
+            if vorhanden and spalte not in vorhanden:
+                conn.execute(f"ALTER TABLE {SCHEMA}.{tabelle} ADD COLUMN {spalte} {typ}")  # noqa: S608
+                ergaenzt.append(f"{tabelle}.{spalte}")
+    if ergaenzt:
+        conn.commit()
+    return ergaenzt
 
 
 # --------------------------------------------------------------------------
@@ -368,7 +476,7 @@ BOX_FELDER = (
     "slug", "spitzname", "item_slug", "faehigkeit_slug", "wesen",
     "punkte_hp", "punkte_attack", "punkte_defense",
     "punkte_sp_attack", "punkte_sp_defense", "punkte_speed",
-    "attacken", "notiz",
+    "attacken", "notiz", "ist_shiny", "herkunft",
 )
 
 
@@ -388,6 +496,7 @@ def box_speichern(conn: sqlite3.Connection, nutzer_id: int, satz: dict[str, Any]
         werte["attacken"] = json.dumps(list(werte["attacken"])[:4])
     werte["attacken"] = werte["attacken"] or "[]"
     werte["wesen"] = werte["wesen"] or "Hardy"
+    werte["ist_shiny"] = int(bool(werte["ist_shiny"]))
     for feld in BOX_FELDER:
         if feld.startswith("punkte_"):
             werte[feld] = int(werte[feld] or 0)
@@ -529,4 +638,7 @@ def bestand(conn: sqlite3.Connection) -> dict[str, int]:
         "box_eintraege": zaehle("Box_Pokemon"),
         "teams": zaehle("Team"),
         "anmeldungen": zaehle("Anmeldeprotokoll"),
+        "shiny_jagden": zaehle("Shiny_Jagd"),
+        "spielstaende": zaehle("Spielstand_Lauf"),
+        "karten": zaehle("Karte"),
     }

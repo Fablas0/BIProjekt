@@ -239,3 +239,59 @@ def test_bestand_zaehlt_die_eigene_datenhaltung(conn) -> None:
     zahlen = nutzerdaten.bestand(conn)
     assert zahlen["nutzer"] == 1
     assert zahlen["box_eintraege"] == 1
+    assert zahlen["shiny_jagden"] == 0
+    assert zahlen["spielstaende"] == 0
+    assert zahlen["karten"] == 0
+
+
+def test_box_kennt_shiny_und_herkunft(conn) -> None:
+    nutzer = nutzerdaten.anlegen(conn, "fabian", "sicheres-passwort")
+    nutzerdaten.box_speichern(conn, nutzer.nutzer_id,
+                              _box_satz(ist_shiny=True, herkunft="Platin"))
+    nutzerdaten.box_speichern(conn, nutzer.nutzer_id, _box_satz())
+    eintraege = nutzerdaten.box_lesen(conn, nutzer.nutzer_id)
+    assert (eintraege[0]["ist_shiny"], eintraege[0]["herkunft"]) == (1, "Platin")
+    assert (eintraege[1]["ist_shiny"], eintraege[1]["herkunft"]) == (0, None)
+
+
+def test_bestehende_nutzerdatenbank_bekommt_neue_spalten(tmp_path) -> None:
+    """Die Nutzerdatenbank ist nicht wiederbeschaffbar. Eine Datei aus der
+    ersten Fassung -- ohne Shiny-Kennzeichen und Herkunft -- muss beim
+    naechsten Anhaengen die Spalten bekommen, ohne einen Eintrag zu verlieren."""
+    import sqlite3
+
+    alt = sqlite3.connect(tmp_path / "nutzer.db")
+    alt.executescript("""
+        CREATE TABLE Nutzer (nutzer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            benutzername TEXT NOT NULL UNIQUE COLLATE NOCASE, anzeigename TEXT NOT NULL,
+            passwort_hash TEXT NOT NULL, salz TEXT NOT NULL,
+            verfahren TEXT NOT NULL DEFAULT 'pbkdf2_sha256', iterationen INTEGER NOT NULL,
+            rolle TEXT NOT NULL DEFAULT 'spieler', angelegt_am TEXT NOT NULL,
+            letzte_anmeldung TEXT, ist_aktiv INTEGER NOT NULL DEFAULT 1);
+        CREATE TABLE Box_Pokemon (box_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nutzer_id INTEGER NOT NULL, slug TEXT NOT NULL, spitzname TEXT,
+            item_slug TEXT, faehigkeit_slug TEXT, wesen TEXT NOT NULL DEFAULT 'Hardy',
+            punkte_hp INTEGER NOT NULL DEFAULT 0, punkte_attack INTEGER NOT NULL DEFAULT 0,
+            punkte_defense INTEGER NOT NULL DEFAULT 0,
+            punkte_sp_attack INTEGER NOT NULL DEFAULT 0,
+            punkte_sp_defense INTEGER NOT NULL DEFAULT 0,
+            punkte_speed INTEGER NOT NULL DEFAULT 0,
+            attacken TEXT NOT NULL DEFAULT '[]', notiz TEXT,
+            angelegt_am TEXT NOT NULL, geaendert_am TEXT NOT NULL);
+        INSERT INTO Nutzer (benutzername, anzeigename, passwort_hash, salz, iterationen,
+                            angelegt_am) VALUES ('alt', 'alt', 'x', 'ab', 1, '2026-01-01');
+        INSERT INTO Box_Pokemon (nutzer_id, slug, angelegt_am, geaendert_am)
+             VALUES (1, 'garchomp', '2026-01-01', '2026-01-01');
+    """)
+    alt.commit()
+    alt.close()
+
+    conn = warehouse.verbindung(str(tmp_path / "dwh.db"))
+    nutzerdaten.anhaengen(conn, tmp_path / "nutzer.db")
+    eintrag = nutzerdaten.box_lesen(conn, 1)[0]
+    assert eintrag["slug"] == "garchomp"
+    assert eintrag["ist_shiny"] == 0
+    assert eintrag["herkunft"] is None
+    # Und die neuen Tabellen sind da.
+    assert nutzerdaten.bestand(conn)["shiny_jagden"] == 0
+    conn.close()

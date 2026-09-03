@@ -13,7 +13,7 @@ name: Taeglicher ETL-Lauf
 #
 # ABSCHALTUNG: GitHub deaktiviert einen geplanten Workflow nach 60 Tagen ohne
 # Aktivitaet im Repository. Die Commits des Bots aus diesem Lauf zaehlen dabei
-# ausdruecklich nicht mit. Der Zeitplan ist derzeit bis zum **18.10.2026**
+# ausdruecklich nicht mit. Der Zeitplan ist derzeit bis zum **02.11.2026**
 # gesichert; bis dahin muss ein eigener Commit oder ein Start ueber
 # "Run workflow" erfolgt sein. Danach faellt der Lauf still aus -- und ein
 # nicht abgeholter Tag ist nach der Vorhaltezeit der Quelle verloren.

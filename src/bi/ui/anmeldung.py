@@ -71,12 +71,12 @@ def _kopf() -> None:
     st.markdown(
         f"""<div style='text-align:center;padding:28px 0 8px;'>
         <div style='font-size:2.2rem;font-weight:800;letter-spacing:0.02em;'>
-          <span style='color:{design.POKEMON_BLAU};'>VGC</span>
+          <span style='color:{design.POKEMON_BLAU};'>Pokemon</span>
           <span style='color:{design.POKEMON_GELB};
                 text-shadow:-1px 1px 0 {design.POKEMON_GOLD};'>Business Intelligence</span>
         </div>
-        <div style='opacity:0.7;margin-top:4px;'>bi.fablas.org · Data Warehouse und
-        Analytics fuer Pokemon Champions</div></div>""",
+        <div style='opacity:0.7;margin-top:4px;'>bi.fablas.org · Champions, GO,
+        Sammelkartenspiel, Hauptspiele und Shiny-Jagd</div></div>""",
         unsafe_allow_html=True,
     )
 

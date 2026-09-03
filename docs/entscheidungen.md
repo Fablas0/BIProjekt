@@ -297,7 +297,53 @@ Antworten darauf sind jeweils eine Entscheidung, kein Pflaster:
 
 ---
 
-## 11. Was bewusst nicht gebaut wurde
+## 11. Spielweisen: von der Turnier-Anwendung zum Pokémon-Werkzeug
+
+**Ausgangsfrage:** Die Anwendung soll auch denen dienen, die kein Ranked
+spielen — Nuzlocke, Durchspielen, Pokémon GO, Karten, Shiny-Jagd. Wie, ohne
+die Turnierseiten zu verwässern?
+
+Der Gedankengang trennt **Daten** von **Blick**: die Daten bleiben ein
+Warehouse und eine Nutzerdatenbank; was sich ändert, ist, welche Seiten
+jemand sieht. Eine *Spielweise* (`bi.ui.spielweisen`) ist eine Auswahl von
+Seiten samt der Aufgabe, die jede Seite in dieser Spielweise hat. Dieselbe
+Seite kann in mehreren Spielweisen stehen — das PC-System in fast allen —,
+und keine Seite weiß, in welcher Spielweise sie gerade gezeigt wird.
+
+Verworfen: je Spielweise eine eigene Anwendung (sechsfache Anmeldung, sechs
+Deployments) und der umgekehrte Weg, alle zwanzig Seiten in eine Liste zu
+stellen (dreizehn davon sind für eine Nuzlocke-Spielerin Lärm).
+
+Drei Entscheidungen in den neuen Bausteinen:
+
+* **Shiny-Wahrscheinlichkeiten als Regelbasis mit Wurfrechnung**
+  (`bi.shiny`). Die im Netz kursierenden Tabellenwerte („Masuda 1/683") sind
+  Ergebnisse, keine Eingaben: das Spiel würfelt mehrfach mit 1/4096, und die
+  Chance folgt aus `1 - (1 - 1/N)^Würfe`. Hinterlegt sind die Wurfzahlen; die
+  Tabelle prüft, dass daraus die bekannten Werte entstehen. Die Einordnung
+  eines Zählerstands ist ein **Anteil** aus der geometrischen Verteilung, kein
+  Pech-Stempel ab einer festen Zahl — und die Oberfläche sagt dazu, dass die
+  Verteilung kein Gedächtnis hat.
+* **Nuzlocke-Regeln an der Datenschicht, nicht an der Oberfläche**
+  (`bi.spielstand`). Ein Lauf trägt seine Regeln als Liste; die erste (nur die
+  erste Begegnung je Ort) wird beim Eintragen geprüft, der Spitzname beim
+  Fang verlangt, ein gefallenes Pokémon kehrt nicht zurück. Ein gewöhnlicher
+  Durchgang benutzt dieselbe Tabelle ohne Regeln. Verworfen: zwei Tabellen
+  für dieselbe Sache.
+* **Einsatzcheck ohne stumme Lücke** (`bi.analytics.einsatz`). Zu jedem
+  Pokémon der Box gibt es je Spielform genau einen Befund — auch „kein
+  Einsatz" und „nicht geladen" sind Befunde. Der Champions-Befund folgt der
+  Saisonauswahl wie jede andere Auswertung; dafür wurde bewusst nicht die auf
+  die laufende Saison festgelegte Sicht `V_Usage_Aktuell` verwendet.
+
+**Preis:** Die Nutzerdatenbank hat neue Tabellen und zwei neue Spalten in der
+Box. Weil sie nicht wiederbeschaffbar ist, gibt es dort jetzt dasselbe
+Nachziehen fehlender Spalten wie im Warehouse — nur hinzufügen, nie umbenennen
+— und einen Test mit einer Datei aus der ersten Fassung.
+
+---
+
+## 12. Was bewusst nicht gebaut wurde
 
 * **Keine Nutzungsquote fuer Champions.** Die Quelle liefert keine; ein
   Platzhalter waere eine Erfindung. Stattdessen ordinale Kennzahlen und ein
@@ -313,3 +359,12 @@ Antworten darauf sind jeweils eine Entscheidung, kein Pflaster:
   das Warehouse; die Quellen werden genau einmal am Tag angefasst. Eine
   Auswertung, die bei jedem Seitenaufruf eine fremde API fragt, waere so
   schnell wie das langsamste fremde System.
+* **Keine Kartenstammdaten.** Die Kartensammlung ist Freitext mit optionalem
+  Pokémon-Bezug. Eine Kartendatenbank als fünfte Quelle — zehntausende Karten
+  für eine Sammlungsliste — stünde in keinem Verhältnis; die Brücke zur Meta
+  läuft über das Pokémon auf der Karte, und das reicht für die Frage, ob eine
+  Karte gerade ein Turnierdeck anführt.
+* **Keine Fundorte im Nuzlocke-Lauf.** Welche Pokémon auf Route 203 in Platin
+  erscheinen, wäre die naheliegende Hilfe beim Eintragen — und dieselbe
+  Datentiefe, die der Pokédex bewusst verlinkt statt kopiert (§10). Der Ort
+  ist deshalb Freitext, das Pokémon ein Auswahlfeld.

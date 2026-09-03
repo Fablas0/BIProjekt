@@ -23,7 +23,9 @@ import pandas as pd
 import streamlit as st
 
 from .. import nutzerdaten
+from ..analytics import einsatz
 from ..config import KAMPFFORMATE, MITNAHME, sprite_url
+from ..spielstand import ALLE_EDITIONEN
 from ..stats import (
     MAX_SP_JE_WERT,
     SP_BUDGET,
@@ -38,8 +40,10 @@ from .komponenten import (
     faehigkeit_mit_deutsch,
     hole_verbindung,
     item_mit_deutsch,
+    kennzahl_kachel,
     name_mit_deutsch,
     seitenkopf,
+    tabelle,
     typ_abzeichen_paar,
 )
 
@@ -47,6 +51,11 @@ PUNKTE_BESCHRIFTUNG = {
     "hp": "KP", "attack": "Angriff", "defense": "Verteidigung",
     "sp_attack": "Sp. Angriff", "sp_defense": "Sp. Verteidigung", "speed": "Initiative",
 }
+
+# Woher ein Pokemon stammen kann: die Editionen der Hauptspiele und die
+# uebrigen Spielformen. Eine Auswahlliste, kein Freitext -- siehe
+# ``bi.spielstand.EDITIONEN``.
+HERKUENFTE = ("Pokemon Champions", "Pokemon GO", "Pokemon HOME", "Tausch", *ALLE_EDITIONEN)
 
 
 def _stammdaten(conn) -> dict[str, pd.DataFrame]:
@@ -76,7 +85,8 @@ def zeichne() -> None:
         return
 
     seitenkopf("PC-System",
-               "Eigene Pokemon erfassen, trainieren und zu Teams zusammenstellen")
+               "Eigene Pokemon erfassen, trainieren, zu Teams zusammenstellen -- "
+               "und wissen, wo sie gerade kompetitiv einsetzbar sind")
 
     stamm = _stammdaten(conn)
     if stamm["pokemon"].empty:
@@ -85,11 +95,13 @@ def zeichne() -> None:
                 "*ETL & Datenqualitaet* laden.")
         return
 
-    box, teams, erfassen = st.tabs(["Box", "Teams", "Pokemon ablegen"])
+    box, check, teams, erfassen = st.tabs(["Box", "Einsatzcheck", "Teams", "Pokemon ablegen"])
     with erfassen:
         _erfassung(conn, nutzer, stamm)
     with box:
         _box(conn, nutzer)
+    with check:
+        _einsatzcheck(conn, nutzer)
     with teams:
         _teams(conn, nutzer)
 
@@ -119,7 +131,15 @@ def _erfassung(conn, nutzer, stamm: dict[str, pd.DataFrame],
                     unsafe_allow_html=True)
 
     with st.form("box_erfassung"):
-        spitzname = st.text_input("Spitzname (optional)")
+        oben = st.columns([2, 2, 1])
+        with oben[0]:
+            spitzname = st.text_input("Spitzname (optional)")
+        with oben[1]:
+            herkunft = st.selectbox("Herkunft (Spiel)", list(HERKUENFTE), index=None,
+                                    placeholder="Nicht angegeben")
+        with oben[2]:
+            st.markdown("&nbsp;")
+            ist_shiny = st.checkbox("Shiny")
 
         auswahl = st.columns(3)
         with auswahl[0]:
@@ -172,6 +192,8 @@ def _erfassung(conn, nutzer, stamm: dict[str, pd.DataFrame],
                 **{f"punkte_{name}": punkte[name] for name in STATUSWERTE},
                 "attacken": [attackenkarte[a] for a in attacken if a in attackenkarte],
                 "notiz": notiz or None,
+                "ist_shiny": int(ist_shiny),
+                "herkunft": herkunft,
             })
             st.success(f"{gewaehlt} liegt in der Box.")
             st.rerun()
@@ -192,11 +214,19 @@ def _box(conn, nutzer) -> None:
         return
 
     st.caption(f"{len(eintraege)} Pokemon in der Box. Die Endwerte folgen den "
-               "Champions-Regeln: ein Statuspunkt = +1 auf den Endwert bei Stufe 50.")
+               "Champions-Regeln: ein Statuspunkt = +1 auf den Endwert bei Stufe 50. "
+               "Der Einsatzcheck je Eintrag sagt, wo das Pokemon gerade gespielt wird.")
+
+    urteile = einsatz.pruefen(conn, [e["slug"] for e in eintraege])
 
     for eintrag in eintraege:
         name = eintrag.get("anzeigename") or eintrag["slug"]
         titel = f"{eintrag['spitzname']} ({name})" if eintrag.get("spitzname") else name
+        if eintrag.get("ist_shiny"):
+            titel += " · Shiny"
+        check = urteile.get(eintrag["slug"])
+        if check:
+            titel += f" · {einsatz.URTEIL_TEXT[check.bestes_urteil]}"
         with st.expander(titel):
             spalten = st.columns([1, 2, 2, 1])
             with spalten[0]:
@@ -209,9 +239,18 @@ def _box(conn, nutzer) -> None:
                     f"**Item:** {eintrag.get('item_name') or eintrag.get('item_slug') or '-'}  \n"
                     f"**Faehigkeit:** {eintrag.get('faehigkeit_name') or eintrag.get('faehigkeit_slug') or '-'}  \n"
                     f"**Wesen:** {eintrag['wesen']}  \n"
-                    f"**Attacken:** {', '.join(eintrag['attacken']) or '-'}")
+                    f"**Attacken:** {', '.join(eintrag['attacken']) or '-'}  \n"
+                    f"**Herkunft:** {eintrag.get('herkunft') or '-'}"
+                    + ("  \n**Schillernd** -- ein Shiny" if eintrag.get("ist_shiny") else ""))
                 if eintrag.get("notiz"):
                     st.caption(eintrag["notiz"])
+                if check:
+                    st.markdown("**Einsatzcheck**")
+                    for befund in check.befunde:
+                        st.markdown(kennzahl_kachel(
+                            befund.spielform, einsatz.URTEIL_TEXT[befund.urteil],
+                            befund.text, bedeutung=befund.bedeutung),
+                            unsafe_allow_html=True)
             with spalten[2]:
                 if eintrag.get("hp") is not None:
                     basis = {name: eintrag[name] for name in STATUSWERTE}
@@ -229,6 +268,62 @@ def _box(conn, nutzer) -> None:
                 if st.button("Loeschen", key=f"box_del_{eintrag['box_id']}"):
                     nutzerdaten.box_loeschen(conn, nutzer.nutzer_id, eintrag["box_id"])
                     st.rerun()
+
+
+# --------------------------------------------------------------------------
+# Einsatzcheck
+# --------------------------------------------------------------------------
+
+def _einsatzcheck(conn, nutzer) -> None:
+    """Die ganze Box gegen alle drei Spielformen -- die Frage 'was kann ich
+    damit gerade anfangen?' auf einen Blick."""
+    eintraege = nutzerdaten.box_lesen(conn, nutzer.nutzer_id)
+    if not eintraege:
+        st.info("Die Box ist leer. Der Einsatzcheck braucht mindestens ein Pokemon.")
+        return
+
+    urteile = einsatz.pruefen(conn, [e["slug"] for e in eintraege])
+    spielformen = list(dict.fromkeys(
+        b.spielform for u in urteile.values() for b in u.befunde))
+
+    kacheln = st.columns(len(spielformen) + 1)
+    with kacheln[0]:
+        meta = sum(1 for u in urteile.values() if u.bestes_urteil == "meta")
+        st.markdown(kennzahl_kachel(
+            "Meta-relevant", f"{meta} von {len(urteile)}",
+            "eigene Pokemon, die in mindestens einer Spielform oben mitspielen",
+            bedeutung="guenstig" if meta else "neutral"), unsafe_allow_html=True)
+    for spalte, spielform in zip(kacheln[1:], spielformen, strict=True):
+        with spalte:
+            einsetzbar = sum(
+                1 for u in urteile.values()
+                if (b := u.befund(spielform)) and b.urteil in ("meta", "spielbar"))
+            unbekannt = all(
+                (b := u.befund(spielform)) and b.urteil == "unbekannt" for u in urteile.values())
+            st.markdown(kennzahl_kachel(
+                spielform, "-" if unbekannt else str(einsetzbar),
+                "Spielform nicht geladen" if unbekannt else "davon derzeit einsetzbar",
+                bedeutung="guenstig" if einsetzbar else "neutral"), unsafe_allow_html=True)
+
+    zeilen = []
+    for eintrag in eintraege:
+        check = urteile[eintrag["slug"]]
+        zeile = {
+            "Pokemon": eintrag.get("anzeigename") or eintrag["slug"],
+            "Spitzname": eintrag.get("spitzname") or "",
+            "Gesamt": einsatz.URTEIL_TEXT[check.bestes_urteil],
+        }
+        for befund in check.befunde:
+            zeile[befund.spielform] = f"{einsatz.URTEIL_TEXT[befund.urteil]} -- {befund.text}"
+        zeilen.append(zeile)
+    tabelle(pd.DataFrame(zeilen))
+    st.caption(
+        f"Champions: Meta-relevant bis Rang {einsatz.META_RANGGRENZE}, darueber "
+        f"spielbar, ohne Eintrag kein Einsatz. Pokemon GO: Meta-relevant ab Score "
+        f"{einsatz.GO_EINSATZ_SCORE:.0f} in der besten Liga. Sammelkartenspiel: "
+        "Meta-relevant, wenn das Pokemon ein Turnierdeck anfuehrt. Der Champions-"
+        "Befund folgt der in der Seitenleiste gewaehlten Saison."
+    )
 
 
 # --------------------------------------------------------------------------
